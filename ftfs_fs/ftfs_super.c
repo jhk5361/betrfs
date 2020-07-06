@@ -11,6 +11,7 @@
 #include <linux/path.h>
 #include <linux/kallsyms.h>
 #include <linux/sched.h>
+#include <linux/quotaops.h>
 
 #include "ftfs_fs.h"
 
@@ -51,8 +52,10 @@ ftfs_setup_metadata(struct ftfs_metadata *meta, umode_t mode,
 	meta->u.st.st_uid = current_uid().val;
 	meta->u.st.st_gid = current_gid().val;
 #else
-	meta->u.st.st_uid = current_uid();
-	meta->u.st.st_gid = current_gid();
+	//meta->u.st.st_uid = current_uid();
+	//meta->u.st.st_gid = current_gid();
+	meta->u.st.st_uid = from_kuid_munged(current_user_ns(), current_uid());
+	meta->u.st.st_gid = from_kgid_munged(current_user_ns(), current_gid());
 #endif
 	meta->u.st.st_rdev = rdev;
 	meta->u.st.st_blocks = ftfs_get_block_num_by_size(size);
@@ -79,8 +82,10 @@ ftfs_copy_metadata_from_inode(struct ftfs_metadata *meta, struct inode *inode)
 	meta->u.st.st_uid = inode->i_uid.val;
 	meta->u.st.st_gid = inode->i_gid.val;
 #else
-	meta->u.st.st_uid = inode->i_uid;
-	meta->u.st.st_gid = inode->i_gid;
+	//meta->u.st.st_uid = inode->i_uid;
+	//meta->u.st.st_gid = inode->i_gid;
+	meta->u.st.st_uid = from_kuid_munged(inode->i_sb->s_user_ns, inode->i_uid);
+	meta->u.st.st_gid = from_kgid_munged(inode->i_sb->s_user_ns, inode->i_gid);
 #endif
 	meta->u.st.st_rdev = inode->i_rdev;
 	meta->u.st.st_size = i_size_read(inode);
@@ -367,12 +372,12 @@ repeat:
 	next = this_parent->d_subdirs.next;
 resume:
 	while (next != &this_parent->d_subdirs) {
-		this_parent = list_entry(next, struct dentry, d_u.d_child);
+		this_parent = list_entry(next, struct dentry, d_child);
 		goto start;
 	}
 end:
 	if (this_parent != object) {
-		next = this_parent->d_u.d_child.next;
+		next = this_parent->d_child.next;
 		this_parent = this_parent->d_parent;
 		goto resume;
 	}
@@ -771,7 +776,7 @@ __ftfs_updatepage(struct ftfs_sb_info *sbi, struct inode *inode, DBT *meta_dbt,
 	if (ret)
 		return ret;
 	buf = kmap(page);
-	buf = buf + (offset & ~PAGE_CACHE_MASK);
+	buf = buf + (offset & ~PAGE_MASK);
 	off = block_get_off_by_position(offset);
 	ret = ftfs_bstore_update(sbi->data_db, &data_dbt, txn, buf, len, off);
 	kunmap(page);
@@ -816,14 +821,14 @@ ftfs_writepage(struct page *page, struct writeback_control *wbc)
 	meta_dbt = ftfs_get_read_lock(FTFS_I(inode));
 	set_page_writeback(page);
 	i_size = i_size_read(inode);
-	end_index = i_size >> PAGE_CACHE_SHIFT;
+	end_index = i_size >> PAGE_SHIFT;
 
 	TXN_GOTO_LABEL(retry);
 	ftfs_bstore_txn_begin(sbi->db_env, NULL, &txn, TXN_MAY_WRITE);
 	if (page->index < end_index)
-		ret = __ftfs_writepage(sbi, inode, meta_dbt, page, PAGE_CACHE_SIZE, txn);
+		ret = __ftfs_writepage(sbi, inode, meta_dbt, page, PAGE_SIZE, txn);
 	else {
-		offset = i_size & (~PAGE_CACHE_MASK);
+		offset = i_size & (~PAGE_MASK);
 		if (page->index == end_index && offset != 0)
 			ret = __ftfs_writepage(sbi, inode, meta_dbt, page, offset, txn);
 		else
@@ -851,10 +856,12 @@ ftfs_writepage(struct page *page, struct writeback_control *wbc)
 	return ret;
 }
 
+/*
 static inline void *radix_indirect_to_ptr(void *ptr)
 {
 	return (void *)((unsigned long)ptr & ~RADIX_TREE_INDIRECT_PTR);
 }
+*/
 
 /**
  * (copied from lib/radix-tree.c:radix_tree_gang_lookup_tagged())
@@ -876,17 +883,29 @@ radix_tree_tag_count_exceeds(struct radix_tree_root *root,
 			unsigned int tag)
 {
 	struct radix_tree_iter iter;
-	void **slot;
+	void __rcu **slot;
 	unsigned int count = 0;
+	void *rcu_ret = NULL;
 
 	if (unlikely(!threshold))
 		return 0;
 
 	radix_tree_for_each_tagged(slot, root, &iter, first_index, tag) {
+		rcu_ret = rcu_dereference_raw(*slot);
+		if (!rcu_ret)
+			continue;
+		if (radix_tree_is_internal_node(rcu_ret)) {
+			slot = radix_tree_iter_retry(&iter);
+			continue;
+		}
+		if (++count == threshold)
+			return 1;
+		/*
 		if (!radix_indirect_to_ptr(rcu_dereference_raw(*slot)))
 			continue;
 		if (++count == threshold)
 			return 1;
+		*/
 	}
 
 	return 0;
@@ -923,8 +942,8 @@ __ftfs_writepages_write_pages(struct ftfs_wp_node *list, int nr_pages,
 		copy_data_dbt_from_meta_dbt(data_dbt, meta_dbt, 0);
 retry:
 	i_size = i_size_read(inode);
-	end_index = i_size >> PAGE_CACHE_SHIFT;
-	offset = i_size & (PAGE_CACHE_SIZE - 1);
+	end_index = i_size >> PAGE_SHIFT;
+	offset = i_size & (PAGE_SIZE - 1);
 	ftfs_bstore_txn_begin(sbi->db_env, NULL, &txn, TXN_MAY_WRITE);
 	// we did a lazy approach about the list, so we need an additional i here
 	for (i = 0, it = list->next; i < nr_pages; i++, it = it->next) {
@@ -934,7 +953,7 @@ retry:
 		buf = kmap(page);
 		if (page->index < end_index)
 			ret = ftfs_bstore_put(sbi->data_db, data_dbt, txn, buf,
-			                      PAGE_CACHE_SIZE, is_seq);
+			                      PAGE_SIZE, is_seq);
 		else if (page->index == end_index && offset != 0)
 			ret = ftfs_bstore_put(sbi->data_db, data_dbt, txn, buf,
 			                      offset, is_seq);
@@ -971,7 +990,7 @@ out:
 static int ftfs_writepages(struct address_space *mapping,
 			struct writeback_control *wbc)
 {
-	int i, ret = 0;
+	int ret = 0;
 	int done = 0;
 	struct pagevec pvec;
 	int nr_pages;
@@ -989,7 +1008,7 @@ static int ftfs_writepages(struct address_space *mapping,
 	int nr_list_pages;
 	struct ftfs_wp_node list, *tail, *it;
 
-	pagevec_init(&pvec, 0);
+	pagevec_init(&pvec);
 	if (wbc->range_cyclic) {
 		writeback_index = mapping->writeback_index; /* prev offset */
 		index = writeback_index;
@@ -999,8 +1018,8 @@ static int ftfs_writepages(struct address_space *mapping,
 			cycled = 0;
 		end = -1;
 	} else {
-		index = wbc->range_start >> PAGE_CACHE_SHIFT;
-		end = wbc->range_end >> PAGE_CACHE_SHIFT;
+		index = wbc->range_start >> PAGE_SHIFT;
+		end = wbc->range_end >> PAGE_SHIFT;
 		if (wbc->range_start == 0 && wbc->range_end == LLONG_MAX)
 			range_whole = 1;
 		cycled = 1; /* ignore range_cyclic tests */
@@ -1049,8 +1068,8 @@ retry:
 	list.next = NULL;
 	tail = &list;
 	while (!done && (index <= end)) {
-		nr_pages = pagevec_lookup_tag(&pvec, mapping, &index, tag,
-			      min(end - index, (pgoff_t)PAGEVEC_SIZE-1) + 1);
+		int i;
+		nr_pages = pagevec_lookup_tag(&pvec, mapping, &index, tag);
 		if (nr_pages == 0)
 			break;
 
@@ -1151,7 +1170,7 @@ ftfs_write_begin(struct file *file, struct address_space *mapping,
 {
 	int ret = 0;
 	struct page *page;
-	pgoff_t index = pos >> PAGE_CACHE_SHIFT;
+	pgoff_t index = pos >> PAGE_SHIFT;
 
 	page = grab_cache_page_write_begin(mapping, index, flags);
 	if (!page)
@@ -1182,15 +1201,15 @@ ftfs_write_end(struct file *file, struct address_space *mapping,
 	 *    to disk (generic aio style);
 	 * 2. if not, only write to disk so that we avoid read-before-write.
 	 */
-	if (PageDirty(page) || copied == PAGE_CACHE_SIZE) {
+	if (PageDirty(page) || copied == PAGE_SIZE) {
 		goto postpone_to_writepage;
 	} else if (page_offset(page) >= i_size_read(inode)) {
 		buf = kmap(page);
-		if (pos & ~PAGE_CACHE_MASK)
-			memset(buf, 0, pos & ~PAGE_CACHE_MASK);
-		if (last_pos & ~PAGE_CACHE_MASK)
-			memset(buf + (last_pos & ~PAGE_CACHE_MASK), 0,
-			       PAGE_CACHE_SIZE - (last_pos & ~PAGE_CACHE_MASK));
+		if (pos & ~PAGE_MASK)
+			memset(buf, 0, pos & ~PAGE_MASK);
+		if (last_pos & ~PAGE_MASK)
+			memset(buf + (last_pos & ~PAGE_MASK), 0,
+			       PAGE_SIZE - (last_pos & ~PAGE_MASK));
 		kunmap(page);
 postpone_to_writepage:
 		SetPageUptodate(page);
@@ -1216,7 +1235,8 @@ postpone_to_writepage:
 	}
 
 	unlock_page(page);
-	page_cache_release(page);
+	put_page(page);
+	//page_cache_release(page);
 
 	/* holding i_mutconfigex */
 	if (last_pos > i_size_read(inode)) {
@@ -1272,7 +1292,8 @@ static int ftfs_launder_page(struct page *page)
 }
 
 static int ftfs_rename(struct inode *old_dir, struct dentry *old_dentry,
-                       struct inode *new_dir, struct dentry *new_dentry)
+                       struct inode *new_dir, struct dentry *new_dentry,
+					   unsigned int flags)
 {
 	int ret, err;
 	struct inode *old_inode, *new_inode;
@@ -1285,6 +1306,7 @@ static int ftfs_rename(struct inode *old_dir, struct dentry *old_dentry,
 #ifdef FTFS_CIRCLE
 	int old_mc, old_dc, new_mc, new_dc;
 #endif
+
 
 	// to prevent any other move from happening, we grab sem of parents
 	old_dir_meta_dbt = ftfs_get_read_lock(FTFS_I(old_dir));
@@ -1312,6 +1334,12 @@ static int ftfs_rename(struct inode *old_dir, struct dentry *old_dentry,
 	old_mc = -new_mc;
 	old_dc = -new_dc;
 #endif
+
+	if (flags & RENAME_WHITEOUT) {
+		ret = -ENOENT;
+		goto abort;
+	}
+
 	if (new_inode) {
 #ifdef FTFS_CIRCLE
 		// we either delete an emptry dir or one file,
@@ -1519,8 +1547,8 @@ ftfs_mknod(struct inode *dir, struct dentry *dentry, umode_t mode, dev_t rdev)
 	ino_t ino;
 	DB_TXN *txn;
 
-	if (rdev && !new_valid_dev(rdev))
-		return -EINVAL;
+	//if (rdev && !new_valid_dev(rdev))
+	//	return -EINVAL;
 
 	dir_meta_dbt = ftfs_get_read_lock(FTFS_I(dir));
 	ret = alloc_child_meta_dbt_from_meta_dbt(&meta_dbt, dir_meta_dbt,
@@ -1925,9 +1953,16 @@ static int ftfs_setattr(struct dentry *dentry, struct iattr *iattr)
 	struct inode *inode = dentry->d_inode;
 	loff_t size;
 
-	ret = inode_change_ok(inode, iattr);
+	//ret = inode_change_ok(inode, iattr);
+	ret = setattr_prepare(dentry, iattr);
 	if (ret)
 		return ret;
+
+	if (is_quota_modification(inode, iattr)) {
+		ret = dquot_initialize(inode);
+		if (ret)
+			return ret;
+	}
 
 	size = i_size_read(inode);
 	if ((iattr->ia_valid & ATTR_SIZE) && iattr->ia_size < size) {
@@ -1971,6 +2006,97 @@ err:
 	return ret;
 }
 
+static int ftfs_getattr(const struct path *path, struct kstat *stat,
+		        u32 request_mask, unsigned int query_flags)
+{
+	struct inode *inode = d_inode(path->dentry);
+	unsigned int flags;
+
+	flags = inode->i_flags & (FS_FL_USER_VISIBLE | FS_PROJINHERIT_FL);
+	if (flags & FS_APPEND_FL)
+		stat->attributes |= STATX_ATTR_APPEND;
+	if (flags & FS_COMPR_FL)
+		stat->attributes |= STATX_ATTR_COMPRESSED;
+	if (flags & FS_IMMUTABLE_FL)
+		stat->attributes |= STATX_ATTR_IMMUTABLE;
+	if (flags & FS_NODUMP_FL)
+		stat->attributes |= STATX_ATTR_NODUMP;
+
+	stat->attributes_mask |= (STATX_ATTR_APPEND |
+			      STATX_ATTR_COMPRESSED |
+			      STATX_ATTR_ENCRYPTED |
+			      STATX_ATTR_IMMUTABLE |
+			      STATX_ATTR_NODUMP);
+
+	generic_fillattr(inode, stat);
+
+	return 0;
+}
+
+static void ftfs_put_link(void *arg) {
+	kfree(arg);
+}
+
+static const char *ftfs_get_link(struct dentry *dentry, 
+		         struct inode *inode, 
+				 struct delayed_call *done)
+{
+	int r;
+	char *ret;
+	void *buf;
+	struct ftfs_sb_info *sbi;
+	struct ftfs_inode *ftfs_inode;
+
+	if (!dentry) {
+		return ERR_PTR(-ECHILD);
+	}
+
+	sbi = dentry->d_sb->s_fs_info;
+	ftfs_inode = FTFS_I(dentry->d_inode);
+	DBT *meta_dbt, data_dbt;
+	DB_TXN *txn;
+
+	buf = kmalloc(FTFS_BSTORE_BLOCKSIZE, GFP_KERNEL);
+	if (!buf) {
+		ret = ERR_PTR(-ENOMEM);
+		goto err1;
+	}
+	meta_dbt = ftfs_get_read_lock(ftfs_inode);
+	// now block start from 1
+	r = alloc_data_dbt_from_meta_dbt(&data_dbt, meta_dbt, 1);
+	if (r) {
+		ret = ERR_PTR(r);
+		goto err2;
+	}
+
+	TXN_GOTO_LABEL(retry);
+	ftfs_bstore_txn_begin(sbi->db_env, NULL, &txn, TXN_READONLY);
+	r = ftfs_bstore_get(sbi->data_db, &data_dbt, txn, buf);
+	if (r) {
+		DBOP_JUMP_ON_CONFLICT(r, retry);
+		ftfs_bstore_txn_abort(txn);
+		ret = ERR_PTR(r);
+		goto err3;
+	}
+	r = ftfs_bstore_txn_commit(txn, DB_TXN_NOSYNC);
+	COMMIT_JUMP_ON_CONFLICT(r, retry);
+
+	set_delayed_call(done, ftfs_put_link, buf);
+	ret = buf;
+
+err3:
+	dbt_destroy(&data_dbt);
+err2:
+	ftfs_put_read_lock(ftfs_inode);
+	if (ret != buf) {
+		do_delayed_call(done);
+		clear_delayed_call(done);
+	}
+err1:
+	return ret;
+}
+
+/*
 static void *ftfs_follow_link(struct dentry *dentry, struct nameidata *nd)
 {
 	int r;
@@ -2026,6 +2152,8 @@ static void ftfs_put_link(struct dentry *dentry, struct nameidata *nd,
 		return;
 	kfree(cookie);
 }
+
+*/
 
 static struct inode *ftfs_alloc_inode(struct super_block *sb)
 {
@@ -2171,6 +2299,7 @@ static const struct address_space_operations ftfs_aops = {
 	.launder_page		= ftfs_launder_page,
 };
 
+/*
 static const struct file_operations ftfs_file_file_operations = {
 	.llseek			= generic_file_llseek,
 	.fsync			= ftfs_fsync,
@@ -2180,6 +2309,16 @@ static const struct file_operations ftfs_file_file_operations = {
 	.aio_write		= generic_file_aio_write,
 	.mmap			= generic_file_mmap,
 };
+*/
+
+static const struct file_operations ftfs_file_file_operations = {
+	.llseek			= generic_file_llseek,
+	.fsync			= ftfs_fsync,
+	.read_iter		= generic_file_read_iter,
+	.write_iter		= generic_file_write_iter,
+	.mmap			= generic_file_mmap,
+};
+
 
 static const struct file_operations ftfs_dir_file_operations = {
 	.read			= generic_read_dir,
@@ -2203,13 +2342,22 @@ static const struct inode_operations ftfs_dir_inode_operations = {
 	.mknod			= ftfs_mknod,
 	.rename			= ftfs_rename,
 	.setattr		= ftfs_setattr,
+	.getattr		= ftfs_getattr,
 };
 
+/*
 static const struct inode_operations ftfs_symlink_inode_operations = {
 	.setattr		= ftfs_setattr,
 	.readlink		= generic_readlink,
 	.follow_link		= ftfs_follow_link,
 	.put_link		= ftfs_put_link,
+};
+*/
+
+static const struct inode_operations ftfs_symlink_inode_operations = {
+	.get_link		= ftfs_get_link,
+	.setattr		= ftfs_setattr,
+	.getattr		= ftfs_getattr,
 };
 
 static const struct inode_operations ftfs_special_inode_operations = {
@@ -2266,8 +2414,12 @@ ftfs_setup_inode(struct super_block *sb, DBT *meta_dbt,
 	i->i_uid.val = meta->u.st.st_uid;
 	i->i_gid.val = meta->u.st.st_gid;
 #else
-	i->i_uid = meta->u.st.st_uid;
-	i->i_gid = meta->u.st.st_gid;
+	//i->i_uid = meta->u.st.st_uid;
+	//i->i_gid = meta->u.st.st_gid;
+	//i->i_uid = from_kuid_munged(current_user_ns(), meta->u.st.st_uid);
+	//i->i_gid = from_kgid_munged(current_user_ns(), meta->u.st.st_gid);
+	i->i_uid = make_kuid(i->i_sb->s_user_ns, meta->u.st.st_uid);
+	i->i_gid = make_kgid(i->i_sb->s_user_ns, meta->u.st.st_gid);
 #endif
 	i->i_size = meta->u.st.st_size;
 	i->i_blocks = meta->u.st.st_blocks;

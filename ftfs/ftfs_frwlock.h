@@ -11,6 +11,7 @@
 #include <linux/atomic.h>
 #include <linux/rwsem.h>
 #include <linux/sched.h>
+#include <linux/sched/debug.h>
 #define ftfs_init_rwsem(sem)                                         \
 do {                                                            \
                                                                  \

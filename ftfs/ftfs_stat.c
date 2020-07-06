@@ -5,10 +5,12 @@
 #include <linux/err.h>
 #include <linux/syscalls.h>
 #include <linux/file.h>
+#include <linux/highuid.h>
 #include <linux/path.h>
 #include <linux/dirent.h>
 #include <asm/segment.h>
-#include <asm/uaccess.h>
+//#include <asm/uaccess.h>
+#include <linux/uaccess.h>
 #include <linux/mount.h>
 #include <linux/statfs.h>
 #include <linux/dcache.h>
@@ -28,7 +30,8 @@ static int ftfs_vfs_fstat(unsigned int fd, struct kstat *stat)
 	int error = -EBADF;
 
 	if (f.file) {
-		error = vfs_getattr(&f.file->f_path, stat);
+		//error = vfs_getattr(&f.file->f_path, stat);
+		error = vfs_getattr(&f.file->f_path, stat, STATX_BASIC_STATS, AT_STATX_SYNC_AS_STAT);
 		ftfs_fdput(f);
 	}
 	return error;
@@ -56,7 +59,8 @@ static int ftfs_stat(const char *name, struct stat *statbuf)
 		return error;
 	}
 
-	error = vfs_getattr(&path, &stat); // NB context fine
+	//error = vfs_getattr(&path, &stat); // NB context fine
+	error = vfs_getattr(&path, &stat, STATX_BASIC_STATS, AT_STATX_SYNC_AS_STAT);
 	path_put(&path);
 	if (error) {
 		ftfs_error(__func__, "vfs_getattr failed:%d, pathname:%s",
@@ -78,8 +82,12 @@ static int ftfs_stat(const char *name, struct stat *statbuf)
 	statbuf->st_gid = stat.gid;
 #endif
 #else
-	statbuf->st_uid = stat.uid;
-	statbuf->st_gid = stat.gid;
+	//statbuf->st_uid = stat.uid;
+	//statbuf->st_gid = stat.gid;
+	//SET_UID(statbuf->st_uid, from_kuid_munged(current_user_ns(), stat.uid);
+	//SET_GID(statbuf->st_gid, from_kgid_munged(current_user_ns(), stat.gid);
+	statbuf->st_uid = from_kuid_munged(current_user_ns(), stat.uid);
+	statbuf->st_gid = from_kgid_munged(current_user_ns(), stat.gid);
 #endif
 
 	statbuf->st_rdev = stat.rdev;
@@ -137,8 +145,12 @@ int fstat(int fd, struct stat *statbuf)
 	statbuf->st_gid = stat.gid;
 #endif
 #else
-	statbuf->st_uid = stat.uid;
-	statbuf->st_gid = stat.gid;
+	//statbuf->st_uid = stat.uid;
+	//statbuf->st_gid = stat.gid;
+	//SET_UID(statbuf->st_uid, from_kuid_munged(current_user_ns(), stat.uid);
+	//SET_GID(statbuf->st_gid, from_kgid_munged(current_user_ns(), stat.gid);
+	statbuf->st_uid = from_kuid_munged(current_user_ns(), stat.uid);
+	statbuf->st_gid = from_kgid_munged(current_user_ns(), stat.gid);
 #endif
 
 	statbuf->st_rdev = stat.rdev;

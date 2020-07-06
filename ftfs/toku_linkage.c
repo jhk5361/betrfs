@@ -9,7 +9,8 @@
 #include <linux/file.h>
 #include <linux/dirent.h>
 #include <asm/segment.h>
-#include <asm/uaccess.h>
+//#include <asm/uaccess.h>
+#include <linux/uaccess.h>
 #include <linux/mount.h>
 #include <linux/delay.h>
 #include <linux/sort.h>

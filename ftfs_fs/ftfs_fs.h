@@ -54,8 +54,9 @@
 int init_ftfs_fs(void);
 void exit_ftfs_fs(void);
 
-#define FTFS_BSTORE_BLOCKSIZE_BITS	PAGE_CACHE_SHIFT
-#define FTFS_BSTORE_BLOCKSIZE		PAGE_CACHE_SIZE
+//#define FTFS_BSTORE_BLOCKSIZE_BITS	PAGE_CACHE_SHIFT
+#define FTFS_BSTORE_BLOCKSIZE_BITS	PAGE_SHIFT
+#define FTFS_BSTORE_BLOCKSIZE		PAGE_SIZE
 
 #define PAGE_TO_BLOCK_NUM(page)         ((uint64_t)((page->index) + 1))
 
@@ -358,7 +359,8 @@ static inline void ftio_setup(struct ftio *ftio, struct list_head *pages,
 		list_del(&page->lru);
 		if (!add_to_page_cache_lru(page, mapping, page->index, GFP_KERNEL))
 			ftio_add_page(ftio, page);
-		page_cache_release(page);
+		put_page(page);
+		//page_cache_release(page); #koo
 	}
 	BUG_ON(!list_empty(pages));
 }

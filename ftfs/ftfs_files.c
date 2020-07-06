@@ -17,6 +17,7 @@
 #include <linux/uio.h>
 #include <linux/mm.h>
 #include <linux/falloc.h>
+#include <linux/sched/xacct.h>
 #include "ftfs_files.h"
 #include "ftfs_malloc.h"
 #include "ftfs_southbound.h"
@@ -473,7 +474,7 @@ void ftfs_debug_write(struct file *file, const char *buf, size_t count,
 }
 #endif //FTFS_DEBUG_WRITES
 
-
+#if 0
 /* exactly vfs_write, minus the userspace access check. maybe use vfs_write? */
 static ssize_t ftfs_write(struct file *file, const char *buf, size_t count,
 			  loff_t *pos)
@@ -516,6 +517,13 @@ static ssize_t ftfs_write(struct file *file, const char *buf, size_t count,
 
 	set_fs(saved);
 	return ret;
+}
+#endif
+
+static ssize_t ftfs_write(struct file *file, const char *buf, size_t count,
+		      loff_t *pos)
+{
+	return kernel_write(file, buf, count, pos);
 }
 
 /* similar to write syscall in read_write.c */
@@ -573,13 +581,8 @@ ssize_t pwrite64(int fd, const void *buf, size_t count, loff_t pos)
 static ssize_t ftfs_read(struct file *f, char *buf, size_t count, loff_t *pos)
 {
 	int ret;
-	mm_segment_t saved = get_fs();
 
-	set_fs(get_ds());
-
-	ret = vfs_read(f, buf, count, pos);
-
-	set_fs(saved);
+	ret = kernel_read(f, buf, count, pos);
 
 	return ret;
 }
@@ -676,10 +679,11 @@ retry:
 	//err = security_path_unlink(&path, dentry);
 	//if (err)
 	//	goto exit;
-	err = vfs_unlink(path.dentry->d_inode, dentry);
+	err = vfs_unlink(path.dentry->d_inode, dentry, NULL);
 exit:
 	dput(dentry);
-	mutex_unlock(&path.dentry->d_inode->i_mutex);
+	//mutex_unlock(&path.dentry->d_inode->i_mutex);
+	inode_unlock(path.dentry->d_inode); // Isn't it wrong?
 	if (inode)
 		iput(inode); /* truncate the inode here */
 	mnt_drop_write(ftfs_vfs);
@@ -974,13 +978,33 @@ static ssize_t __ftfs_stream_writebuf(FILE *f, const unsigned char *buf,
 static ssize_t ftfs_readv(struct file *file, const struct iovec *vec,
 			  unsigned long vlen, loff_t *pos)
 {
-	int ret;
+	struct iovec iovstack[UIO_FASTIOV];
+	struct iovec *iov = iovstack;
+	struct iov_iter iter;
+	ssize_t ret;
 	mm_segment_t saved = get_fs();
 	set_fs(get_ds());
-	ret = vfs_readv(file, vec, vlen, pos);
+	ret = import_iovec(READ, vec, vlen, ARRAY_SIZE(iovstack), &iov, &iter);
+	if (ret >= 0) {
+		ret = vfs_iter_read(file, &iter, pos, 0);
+		kfree(iov);
+	}
 	set_fs(saved);
 	return ret;
 }
+
+/*
+static ssize_t ftfs_readv(struct file *file, const struct iovec *vec,
+			  unsigned long vlen, loff_t *pos)
+{
+	int ret;
+	mm_segment_t saved = get_fs();
+	set_fs(get_ds());
+	ret = kernel_readv(file, vec, vlen, pos, 0);
+	set_fs(saved);
+	return ret;
+}
+*/
 
 /* readv syscall from read_write.c */
 ssize_t readv(int fd, const struct iovec *vec, unsigned int vlen)

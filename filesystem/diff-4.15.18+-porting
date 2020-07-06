@@ -1,0 +1,1122 @@
+diff --git a/filesystem/.mkinclude b/filesystem/.mkinclude
+index 673c021..3d93b33 100644
+--- a/filesystem/.mkinclude
++++ b/filesystem/.mkinclude
+@@ -1,3 +1,4 @@
+ #KDIR=$(shell uname -r)
+-KDIR=3.11.10-ftfs
+-MOD_KERN_SOURCE=$(PWD)/../linux-3.11.10
++#KDIR=3.11.10-ftfs
++KDIR=4.15.18+
++MOD_KERN_SOURCE=$(PWD)/../linux-4.15.18+
+diff --git a/filesystem/ftfs_module.c b/filesystem/ftfs_module.c
+index e9b29f7..357d4c0 100644
+--- a/filesystem/ftfs_module.c
++++ b/filesystem/ftfs_module.c
+@@ -12,7 +12,8 @@
+ #include <linux/proc_fs.h>
+ #include <linux/fs.h>
+ #include <linux/fs_struct.h>
+-#include <asm/uaccess.h>
++//#include <asm/uaccess.h> #koo
++#include <linux/uaccess.h>
+ #include <linux/kallsyms.h>
+ #include <linux/dcache.h>
+ #include "ftfs_southbound.h"
+@@ -29,7 +30,7 @@
+ #include "toku_memleak_detect.h"
+ #include "toku_dump_node.h"
+ 
+-MODULE_LICENSE("GPL");
++MODULE_LICENSE("Dual BSD/GPL");
+ MODULE_AUTHOR("Stony Brook University");
+ MODULE_DESCRIPTION("Fractal Tree File System");
+ 
+diff --git a/ftfs/ftfs_dir.c b/ftfs/ftfs_dir.c
+index ff9b2ba..dc32b38 100644
+--- a/ftfs/ftfs_dir.c
++++ b/ftfs/ftfs_dir.c
+@@ -6,7 +6,8 @@
+ #include <linux/file.h>
+ #include <linux/dirent.h>
+ #include <asm/segment.h>
+-#include <asm/uaccess.h>
++//#include <asm/uaccess.h>
++#include <linux/uaccess.h>
+ #include <linux/mount.h>
+ #include <linux/fsnotify.h>
+ #include <linux/statfs.h>
+@@ -25,7 +26,8 @@
+ struct getdents_callback64 {
+ 	struct dir_context ctx;
+ 	struct linux_dirent64 * current_dir;
+-	struct linux_dirent64 * previous;
++	//struct linux_dirent64 * previous;
++	int prev_reclen;
+ 	int count;
+ 	int error;
+ };
+@@ -40,20 +42,67 @@ struct getdents_callback64 {
+ 
+ int resolve_ftfs_dir_symbols(void)
+ {
+-//#ifdef CONFIG_SECURITY
+-//	LOOKUP_SYMBOL_FTFS(security_path_rmdir);
+-//#endif
++	//#ifdef CONFIG_SECURITY
++	//	LOOKUP_SYMBOL_FTFS(security_path_rmdir);
++	//#endif
++	return 0;
++}
++
++static int verify_dirent_name(const char *name, int len)
++{
++	if (len <= 0 || len >= PATH_MAX)
++		return -EIO;
++	if (memchr(name, '/', len))
++		return -EIO;
++	return 0;
++}
++
++static int filldir64(struct dir_context *ctx, const char *name, int namlen,
++		loff_t offset, u64 ino, unsigned int d_type)
++{
++	struct linux_dirent64 *dirent, *prev;
++	struct getdents_callback64 *buf =
++		container_of(ctx, struct getdents_callback64, ctx);
++	int reclen = ALIGN(offsetof(struct linux_dirent64, d_name) + namlen + 1,
++			sizeof(u64));
++	int prev_reclen;
++
++	/*
++	buf->error = verify_dirent_name(name, namlen);
++	if (unlikely(buf->error))
++		return buf->error;
++	*/
++	buf->error = -EINVAL;	/* only used if we fail.. */
++	if (reclen > buf->count)
++		return -EINVAL;
++	prev_reclen = buf->prev_reclen;
++	if (prev_reclen && signal_pending(current))
++		return -EINTR;
++	dirent = buf->current_dir;
++	prev = (void *)dirent - prev_reclen;
++
++	prev->d_off = offset;
++	dirent->d_ino = ino;
++	dirent->d_reclen = reclen;
++	dirent->d_type = d_type;
++	memcpy(dirent->d_name, name, namlen);
++	*(dirent->d_name + namlen) = 0;
++
++	buf->prev_reclen = reclen;
++	buf->current_dir = (void *)dirent + reclen;
++	buf->count -= reclen;
+ 	return 0;
+ }
+ 
++#if 0
+ static int filldir64(void * __buf, const char * name,
+-		     int namlen, loff_t offset,
+-		     u64 ino, unsigned int d_type)
++		int namlen, loff_t offset,
++		u64 ino, unsigned int d_type)
+ {
+ 	struct linux_dirent64 *dirent;
+ 	struct getdents_callback64 *buf = (struct getdents_callback64 *) __buf;
+ 	int reclen = ALIGN(offsetof(struct linux_dirent64, d_name) + namlen + 1,
+-		sizeof(u64));
++			sizeof(u64));
+ 
+ 	buf->error = -EINVAL;	/* only used if we fail.. */
+ 	if (reclen > buf->count)
+@@ -75,13 +124,13 @@ static int filldir64(void * __buf, const char * name,
+ 	buf->count -= reclen;
+ 	return 0;
+ }
++#endif
+ 
+ 
+ int getdents64(unsigned int fd, struct linux_dirent64 *dirent,
+-	       unsigned int count)
++		unsigned int count)
+ {
+ 	struct fd f;
+-	struct linux_dirent64 *lastdirent;
+ 	struct getdents_callback64 buf = {
+ 		.ctx.actor = filldir64,
+ 		.count = count,
+@@ -89,7 +138,6 @@ int getdents64(unsigned int fd, struct linux_dirent64 *dirent,
+ 	};
+ 	int error;
+ 
+-
+ 	f = ftfs_fdget(fd);
+ 	if (!f.file)
+ 		return -EBADF;
+@@ -97,9 +145,11 @@ int getdents64(unsigned int fd, struct linux_dirent64 *dirent,
+ 	error = iterate_dir(f.file, &buf.ctx);
+ 	if (error >= 0)
+ 		error = buf.error;
+-	lastdirent = buf.previous;
+-	if (lastdirent) {
++	if (buf.prev_reclen) {
++		struct linux_dirent64 *lastdirent;
+ 		typeof(lastdirent->d_off) d_off = buf.ctx.pos;
++
++		lastdirent = (void *)buf.current_dir - buf.prev_reclen;
+ 		lastdirent->d_off = d_off;
+ 		error = count - buf.count;
+ 	}
+@@ -161,16 +211,16 @@ char *getcwd(char *buf, int buflen)
+ 
+ 	//pwd = current->fs->pwd;
+ 	pwd = ftfs_fs->pwd; /* wkj: potentially racey? we do not hold
+-			     * ftfs_southbound_loc, but ftfs_fs only
+-			     * written to on module load/unload, so I
+-			     * think this is safe */
++						 * ftfs_southbound_loc, but ftfs_fs only
++						 * written to on module load/unload, so I
++						 * think this is safe */
+ 
+ 	path_get(&pwd);
+ 
+ 	res = d_path(&pwd, buf, buflen);
+ 	if(IS_ERR(res)) {
+-	    ftfs_set_errno(PTR_ERR(res));
+-	    return NULL;
++		ftfs_set_errno(PTR_ERR(res));
++		return NULL;
+ 	}
+ 
+ 	path_put(&pwd);
+@@ -246,7 +296,8 @@ retry:
+ 	if (res)
+ 		goto exit1;
+ 
+-	mutex_lock_nested(&path.dentry->d_inode->i_mutex, I_MUTEX_PARENT);
++	//mutex_lock_nested(&path.dentry->d_inode->i_mutex, I_MUTEX_PARENT);
++	inode_lock(d_inode(path.dentry));
+ 
+ 	dchild = lookup_one_len(base, d, strlen(base));
+ 	res = PTR_ERR(dchild);
+@@ -265,7 +316,8 @@ retry:
+ exit3:
+ 	dput(dchild);
+ exit2:
+-	mutex_unlock(&path.dentry->d_inode->i_mutex);
++	//mutex_unlock(&path.dentry->d_inode->i_mutex);
++	inode_unlock(d_inode(path.dentry));
+ 	mnt_drop_write(path.mnt);
+ 
+ exit1:
+@@ -304,11 +356,12 @@ int opendir_helper(const char *name, int flags)
+ 	if (IS_ERR(f)) {
+ 		ftfs_put_unused_fd(fd);
+ 		ftfs_error(__func__, "filp_open (%s) failed:%d", name,
+-			PTR_ERR(f));
++				PTR_ERR(f));
+ 		return PTR_ERR(f);
+ 	}
+ 
+-	inode = f->f_dentry->d_inode;
++	//inode = f->f_dentry->d_inode;
++	inode = d_inode(f->f_path.dentry);
+ 	if(S_ISDIR(inode->i_mode)) {
+ 		fsnotify_open(f);
+ 		ftfs_fd_install(fd, f);
+@@ -365,7 +418,7 @@ struct dirent64 * readdir64(DIR* dirp) {
+ 
+ 	if(dirp->buf_pos >= dirp->buf_end) {
+ 		length = getdents64(dirp->fd, (struct linux_dirent64 *)dirp->buf,
+-			    sizeof dirp->buf);
++				sizeof dirp->buf);
+ 		if(length <= 0)
+ 			return NULL;
+ 
+diff --git a/ftfs/ftfs_files.c b/ftfs/ftfs_files.c
+index 30f12b3..1110d5d 100644
+--- a/ftfs/ftfs_files.c
++++ b/ftfs/ftfs_files.c
+@@ -17,6 +17,7 @@
+ #include <linux/uio.h>
+ #include <linux/mm.h>
+ #include <linux/falloc.h>
++#include <linux/sched/xacct.h>
+ #include "ftfs_files.h"
+ #include "ftfs_malloc.h"
+ #include "ftfs_southbound.h"
+@@ -473,7 +474,7 @@ void ftfs_debug_write(struct file *file, const char *buf, size_t count,
+ }
+ #endif //FTFS_DEBUG_WRITES
+ 
+-
++#if 0
+ /* exactly vfs_write, minus the userspace access check. maybe use vfs_write? */
+ static ssize_t ftfs_write(struct file *file, const char *buf, size_t count,
+ 			  loff_t *pos)
+@@ -517,6 +518,13 @@ static ssize_t ftfs_write(struct file *file, const char *buf, size_t count,
+ 	set_fs(saved);
+ 	return ret;
+ }
++#endif
++
++static ssize_t ftfs_write(struct file *file, const char *buf, size_t count,
++		      loff_t *pos)
++{
++	return kernel_write(file, buf, count, pos);
++}
+ 
+ /* similar to write syscall in read_write.c */
+ ssize_t write(int fd, const void *buf, size_t count)
+@@ -573,13 +581,8 @@ ssize_t pwrite64(int fd, const void *buf, size_t count, loff_t pos)
+ static ssize_t ftfs_read(struct file *f, char *buf, size_t count, loff_t *pos)
+ {
+ 	int ret;
+-	mm_segment_t saved = get_fs();
+-
+-	set_fs(get_ds());
+ 
+-	ret = vfs_read(f, buf, count, pos);
+-
+-	set_fs(saved);
++	ret = kernel_read(f, buf, count, pos);
+ 
+ 	return ret;
+ }
+@@ -676,10 +679,11 @@ retry:
+ 	//err = security_path_unlink(&path, dentry);
+ 	//if (err)
+ 	//	goto exit;
+-	err = vfs_unlink(path.dentry->d_inode, dentry);
++	err = vfs_unlink(path.dentry->d_inode, dentry, NULL);
+ exit:
+ 	dput(dentry);
+-	mutex_unlock(&path.dentry->d_inode->i_mutex);
++	//mutex_unlock(&path.dentry->d_inode->i_mutex);
++	inode_unlock(path.dentry->d_inode); // Isn't it wrong?
+ 	if (inode)
+ 		iput(inode); /* truncate the inode here */
+ 	mnt_drop_write(ftfs_vfs);
+@@ -974,13 +978,33 @@ static ssize_t __ftfs_stream_writebuf(FILE *f, const unsigned char *buf,
+ static ssize_t ftfs_readv(struct file *file, const struct iovec *vec,
+ 			  unsigned long vlen, loff_t *pos)
+ {
++	struct iovec iovstack[UIO_FASTIOV];
++	struct iovec *iov = iovstack;
++	struct iov_iter iter;
++	ssize_t ret;
++	mm_segment_t saved = get_fs();
++	set_fs(get_ds());
++	ret = import_iovec(READ, vec, vlen, ARRAY_SIZE(iovstack), &iov, &iter);
++	if (ret >= 0) {
++		ret = vfs_iter_read(file, &iter, pos, 0);
++		kfree(iov);
++	}
++	set_fs(saved);
++	return ret;
++}
++
++/*
++static ssize_t ftfs_readv(struct file *file, const struct iovec *vec,
++			  unsigned long vlen, loff_t *pos)
++{
+ 	int ret;
+ 	mm_segment_t saved = get_fs();
+ 	set_fs(get_ds());
+-	ret = vfs_readv(file, vec, vlen, pos);
++	ret = kernel_readv(file, vec, vlen, pos, 0);
+ 	set_fs(saved);
+ 	return ret;
+ }
++*/
+ 
+ /* readv syscall from read_write.c */
+ ssize_t readv(int fd, const struct iovec *vec, unsigned int vlen)
+diff --git a/ftfs/ftfs_frwlock.h b/ftfs/ftfs_frwlock.h
+index e3c901d..90deb93 100644
+--- a/ftfs/ftfs_frwlock.h
++++ b/ftfs/ftfs_frwlock.h
+@@ -11,6 +11,7 @@
+ #include <linux/atomic.h>
+ #include <linux/rwsem.h>
+ #include <linux/sched.h>
++#include <linux/sched/debug.h>
+ #define ftfs_init_rwsem(sem)                                         \
+ do {                                                            \
+                                                                  \
+diff --git a/ftfs/ftfs_malloc.c b/ftfs/ftfs_malloc.c
+index 98fe248..e854dd8 100644
+--- a/ftfs/ftfs_malloc.c
++++ b/ftfs/ftfs_malloc.c
+@@ -538,7 +538,7 @@ int posix_memalign(void **res, size_t align, size_t len)
+ }
+ 
+ void * ftfs_malloc_aligned(size_t alignment, size_t size) {
+-	void * p;
++	void * p = NULL;
+ 	int r = posix_memalign(&p, alignment, size);
+ 	if(r!=0) {
+ 		set_errno(r);
+diff --git a/ftfs/ftfs_partitioned_counter.c b/ftfs/ftfs_partitioned_counter.c
+index 96f7cb5..b8d0201 100644
+--- a/ftfs/ftfs_partitioned_counter.c
++++ b/ftfs/ftfs_partitioned_counter.c
+@@ -22,7 +22,7 @@ PARTITIONED_COUNTER create_partitioned_counter(void)
+ 		return NULL;
+ 	}
+ 
+-	err = percpu_counter_init(&pc->pcpu_counter, 0);
++	err = percpu_counter_init(&pc->pcpu_counter, 0, GFP_KERNEL); //koo
+ 	if (err) {
+ 		ftfs_error(__func__, "err creating a partitioned counter: %d",
+ 			err);
+diff --git a/ftfs/ftfs_random.c b/ftfs/ftfs_random.c
+index c972f2d..7353493 100644
+--- a/ftfs/ftfs_random.c
++++ b/ftfs/ftfs_random.c
+@@ -1,7 +1,8 @@
+ /* -*- mode: C++; c-basic-offset: 8; indent-tabs-mode: t -*- */
+ // vim: set tabstop=8 softtabstop=8 shiftwidth=8 noexpandtab:
+ #include <linux/slab.h>
+-#include <asm/uaccess.h>
++//#include <asm/uaccess.h>
++#include <linux/uaccess.h>
+ #include <linux/random.h>
+ #include "ftfs_random.h"
+ struct mutex lock_random_generator;
+diff --git a/ftfs/ftfs_rwsem.c b/ftfs/ftfs_rwsem.c
+index 6ca6d34..2403e61 100644
+--- a/ftfs/ftfs_rwsem.c
++++ b/ftfs/ftfs_rwsem.c
+@@ -11,12 +11,14 @@
+ #include <linux/sched.h>
+ #include <linux/init.h>
+ #include <linux/export.h>
++#include <linux/sched/task.h>
+ /*
+  * Initialize an rwsem:
+  */
+ void __ftfs_init_rwsem(struct rw_semaphore *sem, const char *name)
+ {
+-	sem->count = FTFS_RWSEM_UNLOCKED_VALUE;
++	//sem->count = FTFS_RWSEM_UNLOCKED_VALUE;
++	atomic_long_set(&sem->count, FTFS_RWSEM_UNLOCKED_VALUE);
+ 	raw_spin_lock_init(&sem->wait_lock);
+ 	INIT_LIST_HEAD(&sem->wait_list);
+ }
+@@ -171,7 +173,8 @@ ftfs_rwsem_down_failed_common(struct rw_semaphore *sem, pthread_mutex_t * mux,
+ 	struct task_struct *tsk = current;
+ 	signed long count;
+ 
+-	set_task_state(tsk, TASK_UNINTERRUPTIBLE);
++	//set_task_state(tsk, TASK_UNINTERRUPTIBLE);
++	set_current_state(TASK_UNINTERRUPTIBLE);
+ 
+ 	/* set up my own style of waitqueue */
+ 	raw_spin_lock_irq(&sem->wait_lock);
+@@ -206,7 +209,8 @@ ftfs_rwsem_down_failed_common(struct rw_semaphore *sem, pthread_mutex_t * mux,
+ 		if (!waiter.task)
+ 			break;
+ 		schedule();
+-		set_task_state(tsk, TASK_UNINTERRUPTIBLE);
++		//set_task_state(tsk, TASK_UNINTERRUPTIBLE);
++		set_current_state(TASK_UNINTERRUPTIBLE);
+ 	}
+         if(mux) pthread_mutex_lock(mux);
+ 	tsk->state = TASK_RUNNING;
+@@ -226,7 +230,7 @@ struct rw_semaphore __sched *ftfs_rwsem_down_read_failed(struct rw_semaphore *se
+ /*
+  * wait for the write lock to be granted
+  */
+-struct rw_semaphore __sched * ftfs_rwsem_down_write_failed(struct rw_semaphore *sem, pthread_mutex_t * mux)
++struct rw_semaphore __sched *ftfs_rwsem_down_write_failed(struct rw_semaphore *sem, pthread_mutex_t * mux)
+ {
+ 	return ftfs_rwsem_down_failed_common(sem, mux, FTFS_RWSEM_WAITING_FOR_WRITE,
+ 					-FTFS_RWSEM_ACTIVE_WRITE_BIAS);
+diff --git a/ftfs/ftfs_rwsem.h b/ftfs/ftfs_rwsem.h
+index 9ad2f1b..f0050fb 100644
+--- a/ftfs/ftfs_rwsem.h
++++ b/ftfs/ftfs_rwsem.h
+@@ -14,6 +14,7 @@
+ 
+ #include <linux/rwsem.h>
+ #include <linux/sched.h>
++#include <linux/sched/debug.h>
+ #include "ftfs_pthread.h"
+ /*
+  * lock for reading
+@@ -36,9 +37,12 @@ static inline void __ftfs_down_read(struct rw_semaphore *sem, pthread_mutex_t *
+ static inline int __ftfs_down_read_trylock(struct rw_semaphore *sem)
+ {
+ 	long tmp;
+- 	while ((tmp = sem->count) >= 0) {
+-             if (tmp == cmpxchg(&sem->count, tmp,
+-                               tmp + FTFS_RWSEM_ACTIVE_READ_BIAS)) {
++ 	//while ((tmp = sem->count) >= 0) {
++ 	while ((tmp = atomic_long_read(&sem->count)) >= 0) {
++             //if (tmp == cmpxchg(&sem->count, tmp,
++             //                  tmp + FTFS_RWSEM_ACTIVE_READ_BIAS)) {
++			 if (tmp == atomic_long_cmpxchg_acquire(&sem->count, tmp,
++						                            tmp + FTFS_RWSEM_ACTIVE_READ_BIAS)) {
+                     return 1;
+ 		}
+ 	}
+@@ -70,7 +74,9 @@ static inline void __ftfs_down_write(struct rw_semaphore *sem, pthread_mutex_t *
+  */
+ static inline int __ftfs_down_write_trylock(struct rw_semaphore *sem)
+ {
+-	long ret = cmpxchg(&sem->count, FTFS_RWSEM_UNLOCKED_VALUE,
++	//long ret = cmpxchg(&sem->count, FTFS_RWSEM_UNLOCKED_VALUE,
++	//		   FTFS_RWSEM_ACTIVE_WRITE_BIAS);
++	long ret = atomic_long_cmpxchg_acquire(&sem->count, FTFS_RWSEM_UNLOCKED_VALUE,
+ 			   FTFS_RWSEM_ACTIVE_WRITE_BIAS);
+ 	if (ret == FTFS_RWSEM_UNLOCKED_VALUE)
+ 		return 1;
+@@ -114,5 +120,6 @@ static inline void ftfs_rwsem_atomic_add(long delta, struct rw_semaphore *sem)
+  */
+ static inline long ftfs_rwsem_atomic_update(long delta, struct rw_semaphore *sem)
+ {
+-	return delta + xadd(&sem->count, delta);
++	//return delta + xadd(&sem->count, delta);
++	return atomic_long_add_return(delta, &sem->count);
+ }
+diff --git a/ftfs/ftfs_southbound.c b/ftfs/ftfs_southbound.c
+index 14275ca..5c4b3c7 100644
+--- a/ftfs/ftfs_southbound.c
++++ b/ftfs/ftfs_southbound.c
+@@ -6,6 +6,8 @@
+ #include <asm/page_types.h>
+ #include <linux/fs_struct.h>
+ #include <linux/mount.h>
++#include <linux/sched/task.h>
++#include <linux/fs.h>
+ #include "ftfs_southbound.h"
+ #include "ftfs.h"
+ #include "ftfs_pthread.h"
+@@ -66,6 +68,7 @@ static struct files_struct ftfs_files_init = {
+ 		.fd             = &ftfs_files_init.fd_array[0],
+ 		.close_on_exec  = ftfs_files_init.close_on_exec_init,
+ 		.open_fds       = ftfs_files_init.open_fds_init,
++		.full_fds_bits       = ftfs_files_init.full_fds_bits_init,
+ 	},
+ 	.file_lock      = __SPIN_LOCK_UNLOCKED(ftfs_files_init.file_lock),
+ };
+@@ -432,6 +435,8 @@ void put_ftfs_southbound(void)
+  * These macros iterate all files on all CPUs for a given superblock.
+  * files_lglock must be held globally.
+  */
++
++#if 0
+ #ifdef CONFIG_SMP
+ 
+ /*
+@@ -461,9 +466,11 @@ void put_ftfs_southbound(void)
+ #define while_file_list_for_each_entry				\
+ }
+ #endif // CONFIG_SMP
++#endif
+ 
+ int __list_open_southbound_files(struct super_block *sb)
+ {
++#if 0
+ 	int count = 0;
+ 	struct file *f;
+ 
+@@ -474,6 +481,12 @@ int __list_open_southbound_files(struct super_block *sb)
+ 	} while_file_list_for_each_entry;
+ 
+ 	return count;
++#endif
++	//int count = get_nr_files();
++	//must be fixed
++	int count = 10;
++
++	return count;
+ }
+ 
+ int list_open_southbound_files(void)
+diff --git a/ftfs/ftfs_stat.c b/ftfs/ftfs_stat.c
+index 4d7d767..b8f3092 100644
+--- a/ftfs/ftfs_stat.c
++++ b/ftfs/ftfs_stat.c
+@@ -5,10 +5,12 @@
+ #include <linux/err.h>
+ #include <linux/syscalls.h>
+ #include <linux/file.h>
++#include <linux/highuid.h>
+ #include <linux/path.h>
+ #include <linux/dirent.h>
+ #include <asm/segment.h>
+-#include <asm/uaccess.h>
++//#include <asm/uaccess.h>
++#include <linux/uaccess.h>
+ #include <linux/mount.h>
+ #include <linux/statfs.h>
+ #include <linux/dcache.h>
+@@ -28,7 +30,8 @@ static int ftfs_vfs_fstat(unsigned int fd, struct kstat *stat)
+ 	int error = -EBADF;
+ 
+ 	if (f.file) {
+-		error = vfs_getattr(&f.file->f_path, stat);
++		//error = vfs_getattr(&f.file->f_path, stat);
++		error = vfs_getattr(&f.file->f_path, stat, STATX_BASIC_STATS, AT_STATX_SYNC_AS_STAT);
+ 		ftfs_fdput(f);
+ 	}
+ 	return error;
+@@ -56,7 +59,8 @@ static int ftfs_stat(const char *name, struct stat *statbuf)
+ 		return error;
+ 	}
+ 
+-	error = vfs_getattr(&path, &stat); // NB context fine
++	//error = vfs_getattr(&path, &stat); // NB context fine
++	error = vfs_getattr(&path, &stat, STATX_BASIC_STATS, AT_STATX_SYNC_AS_STAT);
+ 	path_put(&path);
+ 	if (error) {
+ 		ftfs_error(__func__, "vfs_getattr failed:%d, pathname:%s",
+@@ -78,8 +82,12 @@ static int ftfs_stat(const char *name, struct stat *statbuf)
+ 	statbuf->st_gid = stat.gid;
+ #endif
+ #else
+-	statbuf->st_uid = stat.uid;
+-	statbuf->st_gid = stat.gid;
++	//statbuf->st_uid = stat.uid;
++	//statbuf->st_gid = stat.gid;
++	//SET_UID(statbuf->st_uid, from_kuid_munged(current_user_ns(), stat.uid);
++	//SET_GID(statbuf->st_gid, from_kgid_munged(current_user_ns(), stat.gid);
++	statbuf->st_uid = from_kuid_munged(current_user_ns(), stat.uid);
++	statbuf->st_gid = from_kgid_munged(current_user_ns(), stat.gid);
+ #endif
+ 
+ 	statbuf->st_rdev = stat.rdev;
+@@ -137,8 +145,12 @@ int fstat(int fd, struct stat *statbuf)
+ 	statbuf->st_gid = stat.gid;
+ #endif
+ #else
+-	statbuf->st_uid = stat.uid;
+-	statbuf->st_gid = stat.gid;
++	//statbuf->st_uid = stat.uid;
++	//statbuf->st_gid = stat.gid;
++	//SET_UID(statbuf->st_uid, from_kuid_munged(current_user_ns(), stat.uid);
++	//SET_GID(statbuf->st_gid, from_kgid_munged(current_user_ns(), stat.gid);
++	statbuf->st_uid = from_kuid_munged(current_user_ns(), stat.uid);
++	statbuf->st_gid = from_kgid_munged(current_user_ns(), stat.gid);
+ #endif
+ 
+ 	statbuf->st_rdev = stat.rdev;
+diff --git a/ftfs/ftfs_toku_lock.c b/ftfs/ftfs_toku_lock.c
+index 273bf0c..6a544b5 100644
+--- a/ftfs/ftfs_toku_lock.c
++++ b/ftfs/ftfs_toku_lock.c
+@@ -1,7 +1,8 @@
+ /* -*- mode: C++; c-basic-offset: 8; indent-tabs-mode: t -*- */
+ // vim: set tabstop=8 softtabstop=8 shiftwidth=8 noexpandtab:
+ #include <linux/slab.h>
+-#include <asm/uaccess.h>
++//#include <asm/uaccess.h>
++#include <linux/uaccess.h>
+ #include "ftfs_toku_lock.h"
+ 
+ int ftfs_toku_lock_file(const char *fname, size_t len)
+diff --git a/ftfs/toku_linkage.c b/ftfs/toku_linkage.c
+index 3067d01..71fd19f 100644
+--- a/ftfs/toku_linkage.c
++++ b/ftfs/toku_linkage.c
+@@ -9,7 +9,8 @@
+ #include <linux/file.h>
+ #include <linux/dirent.h>
+ #include <asm/segment.h>
+-#include <asm/uaccess.h>
++//#include <asm/uaccess.h>
++#include <linux/uaccess.h>
+ #include <linux/mount.h>
+ #include <linux/delay.h>
+ #include <linux/sort.h>
+diff --git a/ftfs_fs/ftfs_bstore.c b/ftfs_fs/ftfs_bstore.c
+index 49345e5..ea4330a 100644
+--- a/ftfs_fs/ftfs_bstore.c
++++ b/ftfs_fs/ftfs_bstore.c
+@@ -1031,7 +1031,7 @@ static int ftfs_scan_pages_cb(DBT const *key, DBT const *val, void *extra)
+ 
+ 		while (page_block_num < ftfs_data_key_get_blocknum(data_key, key->size)) {
+ 			page_buf = kmap(page);
+-			memset(page_buf, 0, PAGE_CACHE_SIZE);
++			memset(page_buf, 0, PAGE_SIZE);
+ 			kunmap(page);
+ 
+ 			ftio_advance_page(ftio);
+@@ -1045,9 +1045,9 @@ static int ftfs_scan_pages_cb(DBT const *key, DBT const *val, void *extra)
+ 			page_buf = kmap(page);
+ 			if (val->size)
+ 				memcpy(page_buf, val->data, val->size);
+-			if (val->size < PAGE_CACHE_SIZE)
++			if (val->size < PAGE_SIZE)
+ 				memset(page_buf + val->size, 0,
+-				       PAGE_CACHE_SIZE - val->size);
++				       PAGE_SIZE - val->size);
+ 			kunmap(page);
+ 			ftio_advance_page(ftio);
+ 		}
+@@ -1067,7 +1067,7 @@ static inline void ftfs_bstore_fill_rest_page(struct ftio *ftio)
+ 	while (!ftio_job_done(ftio)) {
+ 		page = ftio_current_page(ftio);
+ 		page_buf = kmap(page);
+-		memset(page_buf, 0, PAGE_CACHE_SIZE);
++		memset(page_buf, 0, PAGE_SIZE);
+ 		kunmap(page);
+ 		ftio_advance_page(ftio);
+ 	}
+diff --git a/ftfs_fs/ftfs_fs.h b/ftfs_fs/ftfs_fs.h
+index aef45ed..9b5df2c 100644
+--- a/ftfs_fs/ftfs_fs.h
++++ b/ftfs_fs/ftfs_fs.h
+@@ -54,8 +54,9 @@
+ int init_ftfs_fs(void);
+ void exit_ftfs_fs(void);
+ 
+-#define FTFS_BSTORE_BLOCKSIZE_BITS	PAGE_CACHE_SHIFT
+-#define FTFS_BSTORE_BLOCKSIZE		PAGE_CACHE_SIZE
++//#define FTFS_BSTORE_BLOCKSIZE_BITS	PAGE_CACHE_SHIFT
++#define FTFS_BSTORE_BLOCKSIZE_BITS	PAGE_SHIFT
++#define FTFS_BSTORE_BLOCKSIZE		PAGE_SIZE
+ 
+ #define PAGE_TO_BLOCK_NUM(page)         ((uint64_t)((page->index) + 1))
+ 
+@@ -358,7 +359,8 @@ static inline void ftio_setup(struct ftio *ftio, struct list_head *pages,
+ 		list_del(&page->lru);
+ 		if (!add_to_page_cache_lru(page, mapping, page->index, GFP_KERNEL))
+ 			ftio_add_page(ftio, page);
+-		page_cache_release(page);
++		put_page(page);
++		//page_cache_release(page); #koo
+ 	}
+ 	BUG_ON(!list_empty(pages));
+ }
+diff --git a/ftfs_fs/ftfs_super.c b/ftfs_fs/ftfs_super.c
+index c051853..6434919 100644
+--- a/ftfs_fs/ftfs_super.c
++++ b/ftfs_fs/ftfs_super.c
+@@ -11,6 +11,7 @@
+ #include <linux/path.h>
+ #include <linux/kallsyms.h>
+ #include <linux/sched.h>
++#include <linux/quotaops.h>
+ 
+ #include "ftfs_fs.h"
+ 
+@@ -51,8 +52,10 @@ ftfs_setup_metadata(struct ftfs_metadata *meta, umode_t mode,
+ 	meta->u.st.st_uid = current_uid().val;
+ 	meta->u.st.st_gid = current_gid().val;
+ #else
+-	meta->u.st.st_uid = current_uid();
+-	meta->u.st.st_gid = current_gid();
++	//meta->u.st.st_uid = current_uid();
++	//meta->u.st.st_gid = current_gid();
++	meta->u.st.st_uid = from_kuid_munged(current_user_ns(), current_uid());
++	meta->u.st.st_gid = from_kgid_munged(current_user_ns(), current_gid());
+ #endif
+ 	meta->u.st.st_rdev = rdev;
+ 	meta->u.st.st_blocks = ftfs_get_block_num_by_size(size);
+@@ -79,8 +82,10 @@ ftfs_copy_metadata_from_inode(struct ftfs_metadata *meta, struct inode *inode)
+ 	meta->u.st.st_uid = inode->i_uid.val;
+ 	meta->u.st.st_gid = inode->i_gid.val;
+ #else
+-	meta->u.st.st_uid = inode->i_uid;
+-	meta->u.st.st_gid = inode->i_gid;
++	//meta->u.st.st_uid = inode->i_uid;
++	//meta->u.st.st_gid = inode->i_gid;
++	meta->u.st.st_uid = from_kuid_munged(inode->i_sb->s_user_ns, inode->i_uid);
++	meta->u.st.st_gid = from_kgid_munged(inode->i_sb->s_user_ns, inode->i_gid);
+ #endif
+ 	meta->u.st.st_rdev = inode->i_rdev;
+ 	meta->u.st.st_size = i_size_read(inode);
+@@ -367,12 +372,12 @@ repeat:
+ 	next = this_parent->d_subdirs.next;
+ resume:
+ 	while (next != &this_parent->d_subdirs) {
+-		this_parent = list_entry(next, struct dentry, d_u.d_child);
++		this_parent = list_entry(next, struct dentry, d_child);
+ 		goto start;
+ 	}
+ end:
+ 	if (this_parent != object) {
+-		next = this_parent->d_u.d_child.next;
++		next = this_parent->d_child.next;
+ 		this_parent = this_parent->d_parent;
+ 		goto resume;
+ 	}
+@@ -771,7 +776,7 @@ __ftfs_updatepage(struct ftfs_sb_info *sbi, struct inode *inode, DBT *meta_dbt,
+ 	if (ret)
+ 		return ret;
+ 	buf = kmap(page);
+-	buf = buf + (offset & ~PAGE_CACHE_MASK);
++	buf = buf + (offset & ~PAGE_MASK);
+ 	off = block_get_off_by_position(offset);
+ 	ret = ftfs_bstore_update(sbi->data_db, &data_dbt, txn, buf, len, off);
+ 	kunmap(page);
+@@ -816,14 +821,14 @@ ftfs_writepage(struct page *page, struct writeback_control *wbc)
+ 	meta_dbt = ftfs_get_read_lock(FTFS_I(inode));
+ 	set_page_writeback(page);
+ 	i_size = i_size_read(inode);
+-	end_index = i_size >> PAGE_CACHE_SHIFT;
++	end_index = i_size >> PAGE_SHIFT;
+ 
+ 	TXN_GOTO_LABEL(retry);
+ 	ftfs_bstore_txn_begin(sbi->db_env, NULL, &txn, TXN_MAY_WRITE);
+ 	if (page->index < end_index)
+-		ret = __ftfs_writepage(sbi, inode, meta_dbt, page, PAGE_CACHE_SIZE, txn);
++		ret = __ftfs_writepage(sbi, inode, meta_dbt, page, PAGE_SIZE, txn);
+ 	else {
+-		offset = i_size & (~PAGE_CACHE_MASK);
++		offset = i_size & (~PAGE_MASK);
+ 		if (page->index == end_index && offset != 0)
+ 			ret = __ftfs_writepage(sbi, inode, meta_dbt, page, offset, txn);
+ 		else
+@@ -851,10 +856,12 @@ ftfs_writepage(struct page *page, struct writeback_control *wbc)
+ 	return ret;
+ }
+ 
++/*
+ static inline void *radix_indirect_to_ptr(void *ptr)
+ {
+ 	return (void *)((unsigned long)ptr & ~RADIX_TREE_INDIRECT_PTR);
+ }
++*/
+ 
+ /**
+  * (copied from lib/radix-tree.c:radix_tree_gang_lookup_tagged())
+@@ -876,17 +883,29 @@ radix_tree_tag_count_exceeds(struct radix_tree_root *root,
+ 			unsigned int tag)
+ {
+ 	struct radix_tree_iter iter;
+-	void **slot;
++	void __rcu **slot;
+ 	unsigned int count = 0;
++	void *rcu_ret = NULL;
+ 
+ 	if (unlikely(!threshold))
+ 		return 0;
+ 
+ 	radix_tree_for_each_tagged(slot, root, &iter, first_index, tag) {
++		rcu_ret = rcu_dereference_raw(*slot);
++		if (!rcu_ret)
++			continue;
++		if (radix_tree_is_internal_node(rcu_ret)) {
++			slot = radix_tree_iter_retry(&iter);
++			continue;
++		}
++		if (++count == threshold)
++			return 1;
++		/*
+ 		if (!radix_indirect_to_ptr(rcu_dereference_raw(*slot)))
+ 			continue;
+ 		if (++count == threshold)
+ 			return 1;
++		*/
+ 	}
+ 
+ 	return 0;
+@@ -923,8 +942,8 @@ __ftfs_writepages_write_pages(struct ftfs_wp_node *list, int nr_pages,
+ 		copy_data_dbt_from_meta_dbt(data_dbt, meta_dbt, 0);
+ retry:
+ 	i_size = i_size_read(inode);
+-	end_index = i_size >> PAGE_CACHE_SHIFT;
+-	offset = i_size & (PAGE_CACHE_SIZE - 1);
++	end_index = i_size >> PAGE_SHIFT;
++	offset = i_size & (PAGE_SIZE - 1);
+ 	ftfs_bstore_txn_begin(sbi->db_env, NULL, &txn, TXN_MAY_WRITE);
+ 	// we did a lazy approach about the list, so we need an additional i here
+ 	for (i = 0, it = list->next; i < nr_pages; i++, it = it->next) {
+@@ -934,7 +953,7 @@ retry:
+ 		buf = kmap(page);
+ 		if (page->index < end_index)
+ 			ret = ftfs_bstore_put(sbi->data_db, data_dbt, txn, buf,
+-			                      PAGE_CACHE_SIZE, is_seq);
++			                      PAGE_SIZE, is_seq);
+ 		else if (page->index == end_index && offset != 0)
+ 			ret = ftfs_bstore_put(sbi->data_db, data_dbt, txn, buf,
+ 			                      offset, is_seq);
+@@ -971,7 +990,7 @@ out:
+ static int ftfs_writepages(struct address_space *mapping,
+ 			struct writeback_control *wbc)
+ {
+-	int i, ret = 0;
++	int ret = 0;
+ 	int done = 0;
+ 	struct pagevec pvec;
+ 	int nr_pages;
+@@ -989,7 +1008,7 @@ static int ftfs_writepages(struct address_space *mapping,
+ 	int nr_list_pages;
+ 	struct ftfs_wp_node list, *tail, *it;
+ 
+-	pagevec_init(&pvec, 0);
++	pagevec_init(&pvec);
+ 	if (wbc->range_cyclic) {
+ 		writeback_index = mapping->writeback_index; /* prev offset */
+ 		index = writeback_index;
+@@ -999,8 +1018,8 @@ static int ftfs_writepages(struct address_space *mapping,
+ 			cycled = 0;
+ 		end = -1;
+ 	} else {
+-		index = wbc->range_start >> PAGE_CACHE_SHIFT;
+-		end = wbc->range_end >> PAGE_CACHE_SHIFT;
++		index = wbc->range_start >> PAGE_SHIFT;
++		end = wbc->range_end >> PAGE_SHIFT;
+ 		if (wbc->range_start == 0 && wbc->range_end == LLONG_MAX)
+ 			range_whole = 1;
+ 		cycled = 1; /* ignore range_cyclic tests */
+@@ -1049,8 +1068,8 @@ retry:
+ 	list.next = NULL;
+ 	tail = &list;
+ 	while (!done && (index <= end)) {
+-		nr_pages = pagevec_lookup_tag(&pvec, mapping, &index, tag,
+-			      min(end - index, (pgoff_t)PAGEVEC_SIZE-1) + 1);
++		int i;
++		nr_pages = pagevec_lookup_tag(&pvec, mapping, &index, tag);
+ 		if (nr_pages == 0)
+ 			break;
+ 
+@@ -1151,7 +1170,7 @@ ftfs_write_begin(struct file *file, struct address_space *mapping,
+ {
+ 	int ret = 0;
+ 	struct page *page;
+-	pgoff_t index = pos >> PAGE_CACHE_SHIFT;
++	pgoff_t index = pos >> PAGE_SHIFT;
+ 
+ 	page = grab_cache_page_write_begin(mapping, index, flags);
+ 	if (!page)
+@@ -1182,15 +1201,15 @@ ftfs_write_end(struct file *file, struct address_space *mapping,
+ 	 *    to disk (generic aio style);
+ 	 * 2. if not, only write to disk so that we avoid read-before-write.
+ 	 */
+-	if (PageDirty(page) || copied == PAGE_CACHE_SIZE) {
++	if (PageDirty(page) || copied == PAGE_SIZE) {
+ 		goto postpone_to_writepage;
+ 	} else if (page_offset(page) >= i_size_read(inode)) {
+ 		buf = kmap(page);
+-		if (pos & ~PAGE_CACHE_MASK)
+-			memset(buf, 0, pos & ~PAGE_CACHE_MASK);
+-		if (last_pos & ~PAGE_CACHE_MASK)
+-			memset(buf + (last_pos & ~PAGE_CACHE_MASK), 0,
+-			       PAGE_CACHE_SIZE - (last_pos & ~PAGE_CACHE_MASK));
++		if (pos & ~PAGE_MASK)
++			memset(buf, 0, pos & ~PAGE_MASK);
++		if (last_pos & ~PAGE_MASK)
++			memset(buf + (last_pos & ~PAGE_MASK), 0,
++			       PAGE_SIZE - (last_pos & ~PAGE_MASK));
+ 		kunmap(page);
+ postpone_to_writepage:
+ 		SetPageUptodate(page);
+@@ -1216,7 +1235,8 @@ postpone_to_writepage:
+ 	}
+ 
+ 	unlock_page(page);
+-	page_cache_release(page);
++	put_page(page);
++	//page_cache_release(page);
+ 
+ 	/* holding i_mutconfigex */
+ 	if (last_pos > i_size_read(inode)) {
+@@ -1272,7 +1292,8 @@ static int ftfs_launder_page(struct page *page)
+ }
+ 
+ static int ftfs_rename(struct inode *old_dir, struct dentry *old_dentry,
+-                       struct inode *new_dir, struct dentry *new_dentry)
++                       struct inode *new_dir, struct dentry *new_dentry,
++					   unsigned int flags)
+ {
+ 	int ret, err;
+ 	struct inode *old_inode, *new_inode;
+@@ -1286,6 +1307,7 @@ static int ftfs_rename(struct inode *old_dir, struct dentry *old_dentry,
+ 	int old_mc, old_dc, new_mc, new_dc;
+ #endif
+ 
++
+ 	// to prevent any other move from happening, we grab sem of parents
+ 	old_dir_meta_dbt = ftfs_get_read_lock(FTFS_I(old_dir));
+ 	new_dir_meta_dbt = ftfs_get_read_lock(FTFS_I(new_dir));
+@@ -1312,6 +1334,12 @@ static int ftfs_rename(struct inode *old_dir, struct dentry *old_dentry,
+ 	old_mc = -new_mc;
+ 	old_dc = -new_dc;
+ #endif
++
++	if (flags & RENAME_WHITEOUT) {
++		ret = -ENOENT;
++		goto abort;
++	}
++
+ 	if (new_inode) {
+ #ifdef FTFS_CIRCLE
+ 		// we either delete an emptry dir or one file,
+@@ -1519,8 +1547,8 @@ ftfs_mknod(struct inode *dir, struct dentry *dentry, umode_t mode, dev_t rdev)
+ 	ino_t ino;
+ 	DB_TXN *txn;
+ 
+-	if (rdev && !new_valid_dev(rdev))
+-		return -EINVAL;
++	//if (rdev && !new_valid_dev(rdev))
++	//	return -EINVAL;
+ 
+ 	dir_meta_dbt = ftfs_get_read_lock(FTFS_I(dir));
+ 	ret = alloc_child_meta_dbt_from_meta_dbt(&meta_dbt, dir_meta_dbt,
+@@ -1925,10 +1953,17 @@ static int ftfs_setattr(struct dentry *dentry, struct iattr *iattr)
+ 	struct inode *inode = dentry->d_inode;
+ 	loff_t size;
+ 
+-	ret = inode_change_ok(inode, iattr);
++	//ret = inode_change_ok(inode, iattr);
++	ret = setattr_prepare(dentry, iattr);
+ 	if (ret)
+ 		return ret;
+ 
++	if (is_quota_modification(inode, iattr)) {
++		ret = dquot_initialize(inode);
++		if (ret)
++			return ret;
++	}
++
+ 	size = i_size_read(inode);
+ 	if ((iattr->ia_valid & ATTR_SIZE) && iattr->ia_size < size) {
+ 		uint64_t block_num;
+@@ -1971,6 +2006,63 @@ err:
+ 	return ret;
+ }
+ 
++static void ftfs_put_link(void *arg) {
++	kfree(arg);
++}
++
++static const char *ftfs_get_link(struct dentry *dentry, 
++		         struct inode *inode, 
++				 struct delayed_call *done)
++{
++	int r;
++	char *ret;
++	void *buf;
++	struct ftfs_sb_info *sbi = dentry->d_sb->s_fs_info;
++	struct ftfs_inode *ftfs_inode = FTFS_I(dentry->d_inode);
++	DBT *meta_dbt, data_dbt;
++	DB_TXN *txn;
++
++	buf = kmalloc(FTFS_BSTORE_BLOCKSIZE, GFP_KERNEL);
++	if (!buf) {
++		ret = ERR_PTR(-ENOMEM);
++		goto err1;
++	}
++	meta_dbt = ftfs_get_read_lock(ftfs_inode);
++	// now block start from 1
++	r = alloc_data_dbt_from_meta_dbt(&data_dbt, meta_dbt, 1);
++	if (r) {
++		ret = ERR_PTR(r);
++		goto err2;
++	}
++
++	TXN_GOTO_LABEL(retry);
++	ftfs_bstore_txn_begin(sbi->db_env, NULL, &txn, TXN_READONLY);
++	r = ftfs_bstore_get(sbi->data_db, &data_dbt, txn, buf);
++	if (r) {
++		DBOP_JUMP_ON_CONFLICT(r, retry);
++		ftfs_bstore_txn_abort(txn);
++		ret = ERR_PTR(r);
++		goto err3;
++	}
++	r = ftfs_bstore_txn_commit(txn, DB_TXN_NOSYNC);
++	COMMIT_JUMP_ON_CONFLICT(r, retry);
++
++	set_delayed_call(done, ftfs_put_link, buf);
++	ret = buf;
++
++err3:
++	dbt_destroy(&data_dbt);
++err2:
++	ftfs_put_read_lock(ftfs_inode);
++	if (ret != buf) {
++		do_delayed_call(done);
++		clear_delayed_call(done);
++	}
++err1:
++	return ret;
++}
++
++/*
+ static void *ftfs_follow_link(struct dentry *dentry, struct nameidata *nd)
+ {
+ 	int r;
+@@ -2027,6 +2119,8 @@ static void ftfs_put_link(struct dentry *dentry, struct nameidata *nd,
+ 	kfree(cookie);
+ }
+ 
++*/
++
+ static struct inode *ftfs_alloc_inode(struct super_block *sb)
+ {
+ 	struct ftfs_inode *ftfs_inode;
+@@ -2171,6 +2265,7 @@ static const struct address_space_operations ftfs_aops = {
+ 	.launder_page		= ftfs_launder_page,
+ };
+ 
++/*
+ static const struct file_operations ftfs_file_file_operations = {
+ 	.llseek			= generic_file_llseek,
+ 	.fsync			= ftfs_fsync,
+@@ -2180,6 +2275,16 @@ static const struct file_operations ftfs_file_file_operations = {
+ 	.aio_write		= generic_file_aio_write,
+ 	.mmap			= generic_file_mmap,
+ };
++*/
++
++static const struct file_operations ftfs_file_file_operations = {
++	.llseek			= generic_file_llseek,
++	.fsync			= ftfs_fsync,
++	.read_iter		= generic_file_read_iter,
++	.write_iter		= generic_file_write_iter,
++	.mmap			= generic_file_mmap,
++};
++
+ 
+ static const struct file_operations ftfs_dir_file_operations = {
+ 	.read			= generic_read_dir,
+@@ -2205,12 +2310,19 @@ static const struct inode_operations ftfs_dir_inode_operations = {
+ 	.setattr		= ftfs_setattr,
+ };
+ 
++/*
+ static const struct inode_operations ftfs_symlink_inode_operations = {
+ 	.setattr		= ftfs_setattr,
+ 	.readlink		= generic_readlink,
+ 	.follow_link		= ftfs_follow_link,
+ 	.put_link		= ftfs_put_link,
+ };
++*/
++
++static const struct inode_operations ftfs_symlink_inode_operations = {
++	.get_link		= ftfs_get_link,
++	.setattr		= ftfs_setattr,
++};
+ 
+ static const struct inode_operations ftfs_special_inode_operations = {
+ 	.setattr		= ftfs_setattr,
+@@ -2266,8 +2378,12 @@ ftfs_setup_inode(struct super_block *sb, DBT *meta_dbt,
+ 	i->i_uid.val = meta->u.st.st_uid;
+ 	i->i_gid.val = meta->u.st.st_gid;
+ #else
+-	i->i_uid = meta->u.st.st_uid;
+-	i->i_gid = meta->u.st.st_gid;
++	//i->i_uid = meta->u.st.st_uid;
++	//i->i_gid = meta->u.st.st_gid;
++	//i->i_uid = from_kuid_munged(current_user_ns(), meta->u.st.st_uid);
++	//i->i_gid = from_kgid_munged(current_user_ns(), meta->u.st.st_gid);
++	i->i_uid = make_kuid(i->i_sb->s_user_ns, meta->u.st.st_uid);
++	i->i_gid = make_kgid(i->i_sb->s_user_ns, meta->u.st.st_gid);
+ #endif
+ 	i->i_size = meta->u.st.st_size;
+ 	i->i_blocks = meta->u.st.st_blocks;
+diff --git a/portability/pthread_union_config_options.h b/portability/pthread_union_config_options.h
+index 30b604c..2d33894 120000
+--- a/portability/pthread_union_config_options.h
++++ b/portability/pthread_union_config_options.h
+@@ -1 +1 @@
+-../linux-3.11.10/pthread_union_config_options.h
+\ No newline at end of file
++../linux-4.15.18+/pthread_union_config_options.h
+\ No newline at end of file

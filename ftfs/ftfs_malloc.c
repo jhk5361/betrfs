@@ -538,7 +538,7 @@ int posix_memalign(void **res, size_t align, size_t len)
 }
 
 void * ftfs_malloc_aligned(size_t alignment, size_t size) {
-	void * p;
+	void * p = NULL;
 	int r = posix_memalign(&p, alignment, size);
 	if(r!=0) {
 		set_errno(r);

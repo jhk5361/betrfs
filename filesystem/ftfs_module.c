@@ -12,7 +12,8 @@
 #include <linux/proc_fs.h>
 #include <linux/fs.h>
 #include <linux/fs_struct.h>
-#include <asm/uaccess.h>
+//#include <asm/uaccess.h> #koo
+#include <linux/uaccess.h>
 #include <linux/kallsyms.h>
 #include <linux/dcache.h>
 #include "ftfs_southbound.h"
@@ -29,7 +30,7 @@
 #include "toku_memleak_detect.h"
 #include "toku_dump_node.h"
 
-MODULE_LICENSE("GPL");
+MODULE_LICENSE("Dual BSD/GPL");
 MODULE_AUTHOR("Stony Brook University");
 MODULE_DESCRIPTION("Fractal Tree File System");
 

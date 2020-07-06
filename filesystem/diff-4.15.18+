@@ -1,0 +1,383 @@
+diff --git a/filesystem/.mkinclude b/filesystem/.mkinclude
+index 673c021..3d93b33 100644
+--- a/filesystem/.mkinclude
++++ b/filesystem/.mkinclude
+@@ -1,3 +1,4 @@
+ #KDIR=$(shell uname -r)
+-KDIR=3.11.10-ftfs
+-MOD_KERN_SOURCE=$(PWD)/../linux-3.11.10
++#KDIR=3.11.10-ftfs
++KDIR=4.15.18+
++MOD_KERN_SOURCE=$(PWD)/../linux-4.15.18+
+diff --git a/filesystem/ftfs_module.c b/filesystem/ftfs_module.c
+index e9b29f7..f3f92c6 100644
+--- a/filesystem/ftfs_module.c
++++ b/filesystem/ftfs_module.c
+@@ -12,7 +12,8 @@
+ #include <linux/proc_fs.h>
+ #include <linux/fs.h>
+ #include <linux/fs_struct.h>
+-#include <asm/uaccess.h>
++//#include <asm/uaccess.h> #koo
++#include <linux/uaccess.h>
+ #include <linux/kallsyms.h>
+ #include <linux/dcache.h>
+ #include "ftfs_southbound.h"
+diff --git a/ftfs/ftfs_dir.c b/ftfs/ftfs_dir.c
+index ff9b2ba..7d4e8e2 100644
+--- a/ftfs/ftfs_dir.c
++++ b/ftfs/ftfs_dir.c
+@@ -6,7 +6,8 @@
+ #include <linux/file.h>
+ #include <linux/dirent.h>
+ #include <asm/segment.h>
+-#include <asm/uaccess.h>
++//#include <asm/uaccess.h>
++#include <linux/uaccess.h>
+ #include <linux/mount.h>
+ #include <linux/fsnotify.h>
+ #include <linux/statfs.h>
+diff --git a/ftfs/ftfs_files.c b/ftfs/ftfs_files.c
+index 30f12b3..c4817b9 100644
+--- a/ftfs/ftfs_files.c
++++ b/ftfs/ftfs_files.c
+@@ -17,6 +17,7 @@
+ #include <linux/uio.h>
+ #include <linux/mm.h>
+ #include <linux/falloc.h>
++#include <linux/sched/xacct.h>
+ #include "ftfs_files.h"
+ #include "ftfs_malloc.h"
+ #include "ftfs_southbound.h"
+@@ -473,7 +474,7 @@ void ftfs_debug_write(struct file *file, const char *buf, size_t count,
+ }
+ #endif //FTFS_DEBUG_WRITES
+ 
+-
++#if 0
+ /* exactly vfs_write, minus the userspace access check. maybe use vfs_write? */
+ static ssize_t ftfs_write(struct file *file, const char *buf, size_t count,
+ 			  loff_t *pos)
+@@ -517,6 +518,13 @@ static ssize_t ftfs_write(struct file *file, const char *buf, size_t count,
+ 	set_fs(saved);
+ 	return ret;
+ }
++#endif
++
++static ssize_t ftfs_write(struct file *file, const char *buf, size_t count,
++		      loff_t *pos)
++{
++	return vfs_write(file, buf, count, pos);
++}
+ 
+ /* similar to write syscall in read_write.c */
+ ssize_t write(int fd, const void *buf, size_t count)
+@@ -676,10 +684,11 @@ retry:
+ 	//err = security_path_unlink(&path, dentry);
+ 	//if (err)
+ 	//	goto exit;
+-	err = vfs_unlink(path.dentry->d_inode, dentry);
++	err = vfs_unlink(path.dentry->d_inode, dentry, NULL);
+ exit:
+ 	dput(dentry);
+-	mutex_unlock(&path.dentry->d_inode->i_mutex);
++	//mutex_unlock(&path.dentry->d_inode->i_mutex);
++	inode_unlock(path.dentry->d_inode);
+ 	if (inode)
+ 		iput(inode); /* truncate the inode here */
+ 	mnt_drop_write(ftfs_vfs);
+@@ -977,7 +986,7 @@ static ssize_t ftfs_readv(struct file *file, const struct iovec *vec,
+ 	int ret;
+ 	mm_segment_t saved = get_fs();
+ 	set_fs(get_ds());
+-	ret = vfs_readv(file, vec, vlen, pos);
++	ret = vfs_readv(file, vec, vlen, pos, 0);
+ 	set_fs(saved);
+ 	return ret;
+ }
+diff --git a/ftfs/ftfs_frwlock.h b/ftfs/ftfs_frwlock.h
+index e3c901d..90deb93 100644
+--- a/ftfs/ftfs_frwlock.h
++++ b/ftfs/ftfs_frwlock.h
+@@ -11,6 +11,7 @@
+ #include <linux/atomic.h>
+ #include <linux/rwsem.h>
+ #include <linux/sched.h>
++#include <linux/sched/debug.h>
+ #define ftfs_init_rwsem(sem)                                         \
+ do {                                                            \
+                                                                  \
+diff --git a/ftfs/ftfs_partitioned_counter.c b/ftfs/ftfs_partitioned_counter.c
+index 96f7cb5..b8d0201 100644
+--- a/ftfs/ftfs_partitioned_counter.c
++++ b/ftfs/ftfs_partitioned_counter.c
+@@ -22,7 +22,7 @@ PARTITIONED_COUNTER create_partitioned_counter(void)
+ 		return NULL;
+ 	}
+ 
+-	err = percpu_counter_init(&pc->pcpu_counter, 0);
++	err = percpu_counter_init(&pc->pcpu_counter, 0, GFP_KERNEL); //koo
+ 	if (err) {
+ 		ftfs_error(__func__, "err creating a partitioned counter: %d",
+ 			err);
+diff --git a/ftfs/ftfs_random.c b/ftfs/ftfs_random.c
+index c972f2d..7353493 100644
+--- a/ftfs/ftfs_random.c
++++ b/ftfs/ftfs_random.c
+@@ -1,7 +1,8 @@
+ /* -*- mode: C++; c-basic-offset: 8; indent-tabs-mode: t -*- */
+ // vim: set tabstop=8 softtabstop=8 shiftwidth=8 noexpandtab:
+ #include <linux/slab.h>
+-#include <asm/uaccess.h>
++//#include <asm/uaccess.h>
++#include <linux/uaccess.h>
+ #include <linux/random.h>
+ #include "ftfs_random.h"
+ struct mutex lock_random_generator;
+diff --git a/ftfs/ftfs_rwsem.c b/ftfs/ftfs_rwsem.c
+index 6ca6d34..2403e61 100644
+--- a/ftfs/ftfs_rwsem.c
++++ b/ftfs/ftfs_rwsem.c
+@@ -11,12 +11,14 @@
+ #include <linux/sched.h>
+ #include <linux/init.h>
+ #include <linux/export.h>
++#include <linux/sched/task.h>
+ /*
+  * Initialize an rwsem:
+  */
+ void __ftfs_init_rwsem(struct rw_semaphore *sem, const char *name)
+ {
+-	sem->count = FTFS_RWSEM_UNLOCKED_VALUE;
++	//sem->count = FTFS_RWSEM_UNLOCKED_VALUE;
++	atomic_long_set(&sem->count, FTFS_RWSEM_UNLOCKED_VALUE);
+ 	raw_spin_lock_init(&sem->wait_lock);
+ 	INIT_LIST_HEAD(&sem->wait_list);
+ }
+@@ -171,7 +173,8 @@ ftfs_rwsem_down_failed_common(struct rw_semaphore *sem, pthread_mutex_t * mux,
+ 	struct task_struct *tsk = current;
+ 	signed long count;
+ 
+-	set_task_state(tsk, TASK_UNINTERRUPTIBLE);
++	//set_task_state(tsk, TASK_UNINTERRUPTIBLE);
++	set_current_state(TASK_UNINTERRUPTIBLE);
+ 
+ 	/* set up my own style of waitqueue */
+ 	raw_spin_lock_irq(&sem->wait_lock);
+@@ -206,7 +209,8 @@ ftfs_rwsem_down_failed_common(struct rw_semaphore *sem, pthread_mutex_t * mux,
+ 		if (!waiter.task)
+ 			break;
+ 		schedule();
+-		set_task_state(tsk, TASK_UNINTERRUPTIBLE);
++		//set_task_state(tsk, TASK_UNINTERRUPTIBLE);
++		set_current_state(TASK_UNINTERRUPTIBLE);
+ 	}
+         if(mux) pthread_mutex_lock(mux);
+ 	tsk->state = TASK_RUNNING;
+@@ -226,7 +230,7 @@ struct rw_semaphore __sched *ftfs_rwsem_down_read_failed(struct rw_semaphore *se
+ /*
+  * wait for the write lock to be granted
+  */
+-struct rw_semaphore __sched * ftfs_rwsem_down_write_failed(struct rw_semaphore *sem, pthread_mutex_t * mux)
++struct rw_semaphore __sched *ftfs_rwsem_down_write_failed(struct rw_semaphore *sem, pthread_mutex_t * mux)
+ {
+ 	return ftfs_rwsem_down_failed_common(sem, mux, FTFS_RWSEM_WAITING_FOR_WRITE,
+ 					-FTFS_RWSEM_ACTIVE_WRITE_BIAS);
+diff --git a/ftfs/ftfs_rwsem.h b/ftfs/ftfs_rwsem.h
+index 9ad2f1b..f0050fb 100644
+--- a/ftfs/ftfs_rwsem.h
++++ b/ftfs/ftfs_rwsem.h
+@@ -14,6 +14,7 @@
+ 
+ #include <linux/rwsem.h>
+ #include <linux/sched.h>
++#include <linux/sched/debug.h>
+ #include "ftfs_pthread.h"
+ /*
+  * lock for reading
+@@ -36,9 +37,12 @@ static inline void __ftfs_down_read(struct rw_semaphore *sem, pthread_mutex_t *
+ static inline int __ftfs_down_read_trylock(struct rw_semaphore *sem)
+ {
+ 	long tmp;
+- 	while ((tmp = sem->count) >= 0) {
+-             if (tmp == cmpxchg(&sem->count, tmp,
+-                               tmp + FTFS_RWSEM_ACTIVE_READ_BIAS)) {
++ 	//while ((tmp = sem->count) >= 0) {
++ 	while ((tmp = atomic_long_read(&sem->count)) >= 0) {
++             //if (tmp == cmpxchg(&sem->count, tmp,
++             //                  tmp + FTFS_RWSEM_ACTIVE_READ_BIAS)) {
++			 if (tmp == atomic_long_cmpxchg_acquire(&sem->count, tmp,
++						                            tmp + FTFS_RWSEM_ACTIVE_READ_BIAS)) {
+                     return 1;
+ 		}
+ 	}
+@@ -70,7 +74,9 @@ static inline void __ftfs_down_write(struct rw_semaphore *sem, pthread_mutex_t *
+  */
+ static inline int __ftfs_down_write_trylock(struct rw_semaphore *sem)
+ {
+-	long ret = cmpxchg(&sem->count, FTFS_RWSEM_UNLOCKED_VALUE,
++	//long ret = cmpxchg(&sem->count, FTFS_RWSEM_UNLOCKED_VALUE,
++	//		   FTFS_RWSEM_ACTIVE_WRITE_BIAS);
++	long ret = atomic_long_cmpxchg_acquire(&sem->count, FTFS_RWSEM_UNLOCKED_VALUE,
+ 			   FTFS_RWSEM_ACTIVE_WRITE_BIAS);
+ 	if (ret == FTFS_RWSEM_UNLOCKED_VALUE)
+ 		return 1;
+@@ -114,5 +120,6 @@ static inline void ftfs_rwsem_atomic_add(long delta, struct rw_semaphore *sem)
+  */
+ static inline long ftfs_rwsem_atomic_update(long delta, struct rw_semaphore *sem)
+ {
+-	return delta + xadd(&sem->count, delta);
++	//return delta + xadd(&sem->count, delta);
++	return atomic_long_add_return(delta, &sem->count);
+ }
+diff --git a/ftfs/ftfs_southbound.c b/ftfs/ftfs_southbound.c
+index 14275ca..6e90839 100644
+--- a/ftfs/ftfs_southbound.c
++++ b/ftfs/ftfs_southbound.c
+@@ -6,6 +6,7 @@
+ #include <asm/page_types.h>
+ #include <linux/fs_struct.h>
+ #include <linux/mount.h>
++#include <linux/sched/task.h>
+ #include "ftfs_southbound.h"
+ #include "ftfs.h"
+ #include "ftfs_pthread.h"
+@@ -432,6 +433,8 @@ void put_ftfs_southbound(void)
+  * These macros iterate all files on all CPUs for a given superblock.
+  * files_lglock must be held globally.
+  */
++
++#if 0
+ #ifdef CONFIG_SMP
+ 
+ /*
+@@ -461,9 +464,11 @@ void put_ftfs_southbound(void)
+ #define while_file_list_for_each_entry				\
+ }
+ #endif // CONFIG_SMP
++#endif
+ 
+ int __list_open_southbound_files(struct super_block *sb)
+ {
++#if 0
+ 	int count = 0;
+ 	struct file *f;
+ 
+@@ -474,6 +479,13 @@ int __list_open_southbound_files(struct super_block *sb)
+ 	} while_file_list_for_each_entry;
+ 
+ 	return count;
++#endif
++	int count = 0;
++
++	proc_nr_files(NULL, 0, NULL, NULL, NULL);
++
++	count = files_stat.nr_files;
++	return count;
+ }
+ 
+ int list_open_southbound_files(void)
+diff --git a/ftfs/ftfs_stat.c b/ftfs/ftfs_stat.c
+index 4d7d767..c67c7be 100644
+--- a/ftfs/ftfs_stat.c
++++ b/ftfs/ftfs_stat.c
+@@ -8,7 +8,8 @@
+ #include <linux/path.h>
+ #include <linux/dirent.h>
+ #include <asm/segment.h>
+-#include <asm/uaccess.h>
++//#include <asm/uaccess.h>
++#include <linux/uaccess.h>
+ #include <linux/mount.h>
+ #include <linux/statfs.h>
+ #include <linux/dcache.h>
+diff --git a/ftfs/ftfs_toku_lock.c b/ftfs/ftfs_toku_lock.c
+index 273bf0c..6a544b5 100644
+--- a/ftfs/ftfs_toku_lock.c
++++ b/ftfs/ftfs_toku_lock.c
+@@ -1,7 +1,8 @@
+ /* -*- mode: C++; c-basic-offset: 8; indent-tabs-mode: t -*- */
+ // vim: set tabstop=8 softtabstop=8 shiftwidth=8 noexpandtab:
+ #include <linux/slab.h>
+-#include <asm/uaccess.h>
++//#include <asm/uaccess.h>
++#include <linux/uaccess.h>
+ #include "ftfs_toku_lock.h"
+ 
+ int ftfs_toku_lock_file(const char *fname, size_t len)
+diff --git a/ftfs/toku_linkage.c b/ftfs/toku_linkage.c
+index 3067d01..71fd19f 100644
+--- a/ftfs/toku_linkage.c
++++ b/ftfs/toku_linkage.c
+@@ -9,7 +9,8 @@
+ #include <linux/file.h>
+ #include <linux/dirent.h>
+ #include <asm/segment.h>
+-#include <asm/uaccess.h>
++//#include <asm/uaccess.h>
++#include <linux/uaccess.h>
+ #include <linux/mount.h>
+ #include <linux/delay.h>
+ #include <linux/sort.h>
+diff --git a/ftfs_fs/ftfs_fs.h b/ftfs_fs/ftfs_fs.h
+index aef45ed..1f377f7 100644
+--- a/ftfs_fs/ftfs_fs.h
++++ b/ftfs_fs/ftfs_fs.h
+@@ -358,7 +358,8 @@ static inline void ftio_setup(struct ftio *ftio, struct list_head *pages,
+ 		list_del(&page->lru);
+ 		if (!add_to_page_cache_lru(page, mapping, page->index, GFP_KERNEL))
+ 			ftio_add_page(ftio, page);
+-		page_cache_release(page);
++		put_page(page);
++		//page_cache_release(page); #koo
+ 	}
+ 	BUG_ON(!list_empty(pages));
+ }
+diff --git a/ftfs_fs/ftfs_super.c b/ftfs_fs/ftfs_super.c
+index c051853..7fa646c 100644
+--- a/ftfs_fs/ftfs_super.c
++++ b/ftfs_fs/ftfs_super.c
+@@ -1216,7 +1216,8 @@ postpone_to_writepage:
+ 	}
+ 
+ 	unlock_page(page);
+-	page_cache_release(page);
++	put_page(page);
++	//page_cache_release(page);
+ 
+ 	/* holding i_mutconfigex */
+ 	if (last_pos > i_size_read(inode)) {
+@@ -2171,6 +2172,7 @@ static const struct address_space_operations ftfs_aops = {
+ 	.launder_page		= ftfs_launder_page,
+ };
+ 
++/*
+ static const struct file_operations ftfs_file_file_operations = {
+ 	.llseek			= generic_file_llseek,
+ 	.fsync			= ftfs_fsync,
+@@ -2180,6 +2182,16 @@ static const struct file_operations ftfs_file_file_operations = {
+ 	.aio_write		= generic_file_aio_write,
+ 	.mmap			= generic_file_mmap,
+ };
++*/
++
++static const struct file_operations ftfs_file_file_operations = {
++	.llseek			= generic_file_llseek,
++	.fsync			= ftfs_fsync,
++	.read_iter		= generic_file_read_iter,
++	.write_iter		= generic_file_write_iter,
++	.mmap			= generic_file_mmap,
++};
++
+ 
+ static const struct file_operations ftfs_dir_file_operations = {
+ 	.read			= generic_read_dir,
+diff --git a/portability/pthread_union_config_options.h b/portability/pthread_union_config_options.h
+index 30b604c..2d33894 120000
+--- a/portability/pthread_union_config_options.h
++++ b/portability/pthread_union_config_options.h
+@@ -1 +1 @@
+-../linux-3.11.10/pthread_union_config_options.h
+\ No newline at end of file
++../linux-4.15.18+/pthread_union_config_options.h
+\ No newline at end of file

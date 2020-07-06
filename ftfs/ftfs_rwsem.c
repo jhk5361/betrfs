@@ -11,12 +11,14 @@
 #include <linux/sched.h>
 #include <linux/init.h>
 #include <linux/export.h>
+#include <linux/sched/task.h>
 /*
  * Initialize an rwsem:
  */
 void __ftfs_init_rwsem(struct rw_semaphore *sem, const char *name)
 {
-	sem->count = FTFS_RWSEM_UNLOCKED_VALUE;
+	//sem->count = FTFS_RWSEM_UNLOCKED_VALUE;
+	atomic_long_set(&sem->count, FTFS_RWSEM_UNLOCKED_VALUE);
 	raw_spin_lock_init(&sem->wait_lock);
 	INIT_LIST_HEAD(&sem->wait_list);
 }
@@ -171,7 +173,8 @@ ftfs_rwsem_down_failed_common(struct rw_semaphore *sem, pthread_mutex_t * mux,
 	struct task_struct *tsk = current;
 	signed long count;
 
-	set_task_state(tsk, TASK_UNINTERRUPTIBLE);
+	//set_task_state(tsk, TASK_UNINTERRUPTIBLE);
+	set_current_state(TASK_UNINTERRUPTIBLE);
 
 	/* set up my own style of waitqueue */
 	raw_spin_lock_irq(&sem->wait_lock);
@@ -206,7 +209,8 @@ ftfs_rwsem_down_failed_common(struct rw_semaphore *sem, pthread_mutex_t * mux,
 		if (!waiter.task)
 			break;
 		schedule();
-		set_task_state(tsk, TASK_UNINTERRUPTIBLE);
+		//set_task_state(tsk, TASK_UNINTERRUPTIBLE);
+		set_current_state(TASK_UNINTERRUPTIBLE);
 	}
         if(mux) pthread_mutex_lock(mux);
 	tsk->state = TASK_RUNNING;
@@ -226,7 +230,7 @@ struct rw_semaphore __sched *ftfs_rwsem_down_read_failed(struct rw_semaphore *se
 /*
  * wait for the write lock to be granted
  */
-struct rw_semaphore __sched * ftfs_rwsem_down_write_failed(struct rw_semaphore *sem, pthread_mutex_t * mux)
+struct rw_semaphore __sched *ftfs_rwsem_down_write_failed(struct rw_semaphore *sem, pthread_mutex_t * mux)
 {
 	return ftfs_rwsem_down_failed_common(sem, mux, FTFS_RWSEM_WAITING_FOR_WRITE,
 					-FTFS_RWSEM_ACTIVE_WRITE_BIAS);

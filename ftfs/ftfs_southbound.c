@@ -6,6 +6,8 @@
 #include <asm/page_types.h>
 #include <linux/fs_struct.h>
 #include <linux/mount.h>
+#include <linux/sched/task.h>
+#include <linux/fs.h>
 #include "ftfs_southbound.h"
 #include "ftfs.h"
 #include "ftfs_pthread.h"
@@ -66,6 +68,7 @@ static struct files_struct ftfs_files_init = {
 		.fd             = &ftfs_files_init.fd_array[0],
 		.close_on_exec  = ftfs_files_init.close_on_exec_init,
 		.open_fds       = ftfs_files_init.open_fds_init,
+		.full_fds_bits       = ftfs_files_init.full_fds_bits_init,
 	},
 	.file_lock      = __SPIN_LOCK_UNLOCKED(ftfs_files_init.file_lock),
 };
@@ -432,6 +435,8 @@ void put_ftfs_southbound(void)
  * These macros iterate all files on all CPUs for a given superblock.
  * files_lglock must be held globally.
  */
+
+#if 0
 #ifdef CONFIG_SMP
 
 /*
@@ -461,9 +466,11 @@ void put_ftfs_southbound(void)
 #define while_file_list_for_each_entry				\
 }
 #endif // CONFIG_SMP
+#endif
 
 int __list_open_southbound_files(struct super_block *sb)
 {
+#if 0
 	int count = 0;
 	struct file *f;
 
@@ -472,6 +479,12 @@ int __list_open_southbound_files(struct super_block *sb)
 		ftfs_error(__func__, "%s is still open",
 			 f->f_path.dentry->d_name.name);
 	} while_file_list_for_each_entry;
+
+	return count;
+#endif
+	//int count = get_nr_files();
+	//must be fixed
+	int count = 10;
 
 	return count;
 }

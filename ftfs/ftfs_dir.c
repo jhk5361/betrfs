@@ -6,7 +6,8 @@
 #include <linux/file.h>
 #include <linux/dirent.h>
 #include <asm/segment.h>
-#include <asm/uaccess.h>
+//#include <asm/uaccess.h>
+#include <linux/uaccess.h>
 #include <linux/mount.h>
 #include <linux/fsnotify.h>
 #include <linux/statfs.h>
@@ -25,7 +26,8 @@
 struct getdents_callback64 {
 	struct dir_context ctx;
 	struct linux_dirent64 * current_dir;
-	struct linux_dirent64 * previous;
+	//struct linux_dirent64 * previous;
+	int prev_reclen;
 	int count;
 	int error;
 };
@@ -40,20 +42,67 @@ struct getdents_callback64 {
 
 int resolve_ftfs_dir_symbols(void)
 {
-//#ifdef CONFIG_SECURITY
-//	LOOKUP_SYMBOL_FTFS(security_path_rmdir);
-//#endif
+	//#ifdef CONFIG_SECURITY
+	//	LOOKUP_SYMBOL_FTFS(security_path_rmdir);
+	//#endif
 	return 0;
 }
 
+static int verify_dirent_name(const char *name, int len)
+{
+	if (len <= 0 || len >= PATH_MAX)
+		return -EIO;
+	if (memchr(name, '/', len))
+		return -EIO;
+	return 0;
+}
+
+static int filldir64(struct dir_context *ctx, const char *name, int namlen,
+		loff_t offset, u64 ino, unsigned int d_type)
+{
+	struct linux_dirent64 *dirent, *prev;
+	struct getdents_callback64 *buf =
+		container_of(ctx, struct getdents_callback64, ctx);
+	int reclen = ALIGN(offsetof(struct linux_dirent64, d_name) + namlen + 1,
+			sizeof(u64));
+	int prev_reclen;
+
+	/*
+	buf->error = verify_dirent_name(name, namlen);
+	if (unlikely(buf->error))
+		return buf->error;
+	*/
+	buf->error = -EINVAL;	/* only used if we fail.. */
+	if (reclen > buf->count)
+		return -EINVAL;
+	prev_reclen = buf->prev_reclen;
+	if (prev_reclen && signal_pending(current))
+		return -EINTR;
+	dirent = buf->current_dir;
+	prev = (void *)dirent - prev_reclen;
+
+	prev->d_off = offset;
+	dirent->d_ino = ino;
+	dirent->d_reclen = reclen;
+	dirent->d_type = d_type;
+	memcpy(dirent->d_name, name, namlen);
+	*(dirent->d_name + namlen) = 0;
+
+	buf->prev_reclen = reclen;
+	buf->current_dir = (void *)dirent + reclen;
+	buf->count -= reclen;
+	return 0;
+}
+
+#if 0
 static int filldir64(void * __buf, const char * name,
-		     int namlen, loff_t offset,
-		     u64 ino, unsigned int d_type)
+		int namlen, loff_t offset,
+		u64 ino, unsigned int d_type)
 {
 	struct linux_dirent64 *dirent;
 	struct getdents_callback64 *buf = (struct getdents_callback64 *) __buf;
 	int reclen = ALIGN(offsetof(struct linux_dirent64, d_name) + namlen + 1,
-		sizeof(u64));
+			sizeof(u64));
 
 	buf->error = -EINVAL;	/* only used if we fail.. */
 	if (reclen > buf->count)
@@ -75,20 +124,19 @@ static int filldir64(void * __buf, const char * name,
 	buf->count -= reclen;
 	return 0;
 }
+#endif
 
 
 int getdents64(unsigned int fd, struct linux_dirent64 *dirent,
-	       unsigned int count)
+		unsigned int count)
 {
 	struct fd f;
-	struct linux_dirent64 *lastdirent;
 	struct getdents_callback64 buf = {
 		.ctx.actor = filldir64,
 		.count = count,
 		.current_dir = dirent
 	};
 	int error;
-
 
 	f = ftfs_fdget(fd);
 	if (!f.file)
@@ -97,9 +145,11 @@ int getdents64(unsigned int fd, struct linux_dirent64 *dirent,
 	error = iterate_dir(f.file, &buf.ctx);
 	if (error >= 0)
 		error = buf.error;
-	lastdirent = buf.previous;
-	if (lastdirent) {
+	if (buf.prev_reclen) {
+		struct linux_dirent64 *lastdirent;
 		typeof(lastdirent->d_off) d_off = buf.ctx.pos;
+
+		lastdirent = (void *)buf.current_dir - buf.prev_reclen;
 		lastdirent->d_off = d_off;
 		error = count - buf.count;
 	}
@@ -161,16 +211,16 @@ char *getcwd(char *buf, int buflen)
 
 	//pwd = current->fs->pwd;
 	pwd = ftfs_fs->pwd; /* wkj: potentially racey? we do not hold
-			     * ftfs_southbound_loc, but ftfs_fs only
-			     * written to on module load/unload, so I
-			     * think this is safe */
+						 * ftfs_southbound_loc, but ftfs_fs only
+						 * written to on module load/unload, so I
+						 * think this is safe */
 
 	path_get(&pwd);
 
 	res = d_path(&pwd, buf, buflen);
 	if(IS_ERR(res)) {
-	    ftfs_set_errno(PTR_ERR(res));
-	    return NULL;
+		ftfs_set_errno(PTR_ERR(res));
+		return NULL;
 	}
 
 	path_put(&pwd);
@@ -246,7 +296,8 @@ retry:
 	if (res)
 		goto exit1;
 
-	mutex_lock_nested(&path.dentry->d_inode->i_mutex, I_MUTEX_PARENT);
+	//mutex_lock_nested(&path.dentry->d_inode->i_mutex, I_MUTEX_PARENT);
+	inode_lock(d_inode(path.dentry));
 
 	dchild = lookup_one_len(base, d, strlen(base));
 	res = PTR_ERR(dchild);
@@ -265,7 +316,8 @@ retry:
 exit3:
 	dput(dchild);
 exit2:
-	mutex_unlock(&path.dentry->d_inode->i_mutex);
+	//mutex_unlock(&path.dentry->d_inode->i_mutex);
+	inode_unlock(d_inode(path.dentry));
 	mnt_drop_write(path.mnt);
 
 exit1:
@@ -304,11 +356,12 @@ int opendir_helper(const char *name, int flags)
 	if (IS_ERR(f)) {
 		ftfs_put_unused_fd(fd);
 		ftfs_error(__func__, "filp_open (%s) failed:%d", name,
-			PTR_ERR(f));
+				PTR_ERR(f));
 		return PTR_ERR(f);
 	}
 
-	inode = f->f_dentry->d_inode;
+	//inode = f->f_dentry->d_inode;
+	inode = d_inode(f->f_path.dentry);
 	if(S_ISDIR(inode->i_mode)) {
 		fsnotify_open(f);
 		ftfs_fd_install(fd, f);
@@ -365,7 +418,7 @@ struct dirent64 * readdir64(DIR* dirp) {
 
 	if(dirp->buf_pos >= dirp->buf_end) {
 		length = getdents64(dirp->fd, (struct linux_dirent64 *)dirp->buf,
-			    sizeof dirp->buf);
+				sizeof dirp->buf);
 		if(length <= 0)
 			return NULL;
 

@@ -14,6 +14,7 @@
 
 #include <linux/rwsem.h>
 #include <linux/sched.h>
+#include <linux/sched/debug.h>
 #include "ftfs_pthread.h"
 /*
  * lock for reading
@@ -36,9 +37,12 @@ static inline void __ftfs_down_read(struct rw_semaphore *sem, pthread_mutex_t * 
 static inline int __ftfs_down_read_trylock(struct rw_semaphore *sem)
 {
 	long tmp;
- 	while ((tmp = sem->count) >= 0) {
-             if (tmp == cmpxchg(&sem->count, tmp,
-                               tmp + FTFS_RWSEM_ACTIVE_READ_BIAS)) {
+ 	//while ((tmp = sem->count) >= 0) {
+ 	while ((tmp = atomic_long_read(&sem->count)) >= 0) {
+             //if (tmp == cmpxchg(&sem->count, tmp,
+             //                  tmp + FTFS_RWSEM_ACTIVE_READ_BIAS)) {
+			 if (tmp == atomic_long_cmpxchg_acquire(&sem->count, tmp,
+						                            tmp + FTFS_RWSEM_ACTIVE_READ_BIAS)) {
                     return 1;
 		}
 	}
@@ -70,7 +74,9 @@ static inline void __ftfs_down_write(struct rw_semaphore *sem, pthread_mutex_t *
  */
 static inline int __ftfs_down_write_trylock(struct rw_semaphore *sem)
 {
-	long ret = cmpxchg(&sem->count, FTFS_RWSEM_UNLOCKED_VALUE,
+	//long ret = cmpxchg(&sem->count, FTFS_RWSEM_UNLOCKED_VALUE,
+	//		   FTFS_RWSEM_ACTIVE_WRITE_BIAS);
+	long ret = atomic_long_cmpxchg_acquire(&sem->count, FTFS_RWSEM_UNLOCKED_VALUE,
 			   FTFS_RWSEM_ACTIVE_WRITE_BIAS);
 	if (ret == FTFS_RWSEM_UNLOCKED_VALUE)
 		return 1;
@@ -114,5 +120,6 @@ static inline void ftfs_rwsem_atomic_add(long delta, struct rw_semaphore *sem)
  */
 static inline long ftfs_rwsem_atomic_update(long delta, struct rw_semaphore *sem)
 {
-	return delta + xadd(&sem->count, delta);
+	//return delta + xadd(&sem->count, delta);
+	return atomic_long_add_return(delta, &sem->count);
 }

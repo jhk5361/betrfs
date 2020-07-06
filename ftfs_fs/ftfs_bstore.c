@@ -1031,7 +1031,7 @@ static int ftfs_scan_pages_cb(DBT const *key, DBT const *val, void *extra)
 
 		while (page_block_num < ftfs_data_key_get_blocknum(data_key, key->size)) {
 			page_buf = kmap(page);
-			memset(page_buf, 0, PAGE_CACHE_SIZE);
+			memset(page_buf, 0, PAGE_SIZE);
 			kunmap(page);
 
 			ftio_advance_page(ftio);
@@ -1045,9 +1045,9 @@ static int ftfs_scan_pages_cb(DBT const *key, DBT const *val, void *extra)
 			page_buf = kmap(page);
 			if (val->size)
 				memcpy(page_buf, val->data, val->size);
-			if (val->size < PAGE_CACHE_SIZE)
+			if (val->size < PAGE_SIZE)
 				memset(page_buf + val->size, 0,
-				       PAGE_CACHE_SIZE - val->size);
+				       PAGE_SIZE - val->size);
 			kunmap(page);
 			ftio_advance_page(ftio);
 		}
@@ -1067,7 +1067,7 @@ static inline void ftfs_bstore_fill_rest_page(struct ftio *ftio)
 	while (!ftio_job_done(ftio)) {
 		page = ftio_current_page(ftio);
 		page_buf = kmap(page);
-		memset(page_buf, 0, PAGE_CACHE_SIZE);
+		memset(page_buf, 0, PAGE_SIZE);
 		kunmap(page);
 		ftio_advance_page(ftio);
 	}

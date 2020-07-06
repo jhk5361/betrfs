@@ -22,7 +22,7 @@ PARTITIONED_COUNTER create_partitioned_counter(void)
 		return NULL;
 	}
 
-	err = percpu_counter_init(&pc->pcpu_counter, 0);
+	err = percpu_counter_init(&pc->pcpu_counter, 0, GFP_KERNEL); //koo
 	if (err) {
 		ftfs_error(__func__, "err creating a partitioned counter: %d",
 			err);

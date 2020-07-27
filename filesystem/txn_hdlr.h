@@ -10,6 +10,7 @@
 #define C_TXN_BLOOM_M_BYTES 308 // 512 items, p=0.1
 //#define C_TXN_BLOOM_M_BYTES 791 // 512 items, p=0.01
 #define C_TXN_BLOOM_K 3
+#define LIGHTFS_ORDER_MAX 3000000
 
 struct __lightfs_txn_buffer DB_TXN_BUF;
 struct __lightfs_c_txn DB_C_TXN;

@@ -154,32 +154,60 @@ static int lightfs_c_txn_commit(DB_C_TXN *c_txn)
 	//TODO: send commit
 }
 
-static int lightfs_txn_calc_order(DB_TXN *txn) // return 0: orderless, 1: ordered
+/* 
+ * we merge txn to the "merge_c_txn", if possible. 
+ * if not, create a new c_txn after the "new_c_txn"
+ * */
+static enum lightfs_c_txn_state lightfs_txn_calc_order(DB_TXN *txn, DB_C_TXN **merge_c_txn, DB_C_TXN **new_c_txn)
 {
 	DB_C_TXN *c_txn;
 	DB_TXN_BUF *txn_buf;
-	int relations = 0;
-	int best_diff = 3000000;
+	//int relations = 0;
+	int best_diff = LIGHTFS_ORDER_MAX;
 	int diff = 0;
-	DB_C_TXN *best_c_txn;
+	enum lightfs_c_txn_state ret = C_TXN_ORDERLESS;
+	DB_C_TXN *best_c_txn = NULL, *target_c_txn = NULL;
 
 	if (txn_hdlr->orderless_c_txn_cnt == 0) {
 		return 0; // empty
 	}
 	
-	list_for_each_entry(c_txn, &txn_hdlr->orderless_c_txn_list, c_txn_list) {
+	list_for_each_entry_reverse(c_txn, &txn_hdlr->ordered_c_txn_list, c_txn_list) {
+		diff = diff_c_txn_and_txn(c_txn, txn);
+		if (diff >= 0 && best_diff > diff) {
+			best_c_txn = c_txn; // the file that is able to be merged
+		}
 		list_for_each_entry(txn_buf, &txn->txn_buf_list, txn_buf_list) {
 			if (bloomfilter_get(c_txn->filter, txn_buf->key, txn_buf->key_len)) {
-				relations++;
-				diff = diff_c_txn_and_txn(c_txn, txn);
-				if (diff >= 0 && best_diff > diff) {
-					best_c_txn = c_txn;
-				}
-				break;
+				//relations++;
+				target_c_txn = c_txn; // related file
+				ret = C_TXN_ORDERED;
+				goto out;
 			}
 		}
 	}
-	return 0;
+
+	best_diff = LIGHTFS_ORDER_MAX;
+	best_c_txn = NULL;
+	list_for_each_entry_reverse(c_txn, &txn_hdlr->orderless_c_txn_list, c_txn_list) {
+		diff = diff_c_txn_and_txn(c_txn, txn);
+		if (diff >= 0 && best_diff > diff) { // the file that is able to be merge
+			best_c_txn = c_txn;
+		}
+		list_for_each_entry(txn_buf, &txn->txn_buf_list, txn_buf_list) {
+			if (bloomfilter_get(c_txn->filter, txn_buf->key, txn_buf->key_len)) {
+				//relations++;
+				target_c_txn = c_txn; // related file
+				ret = C_TXN_ORDERED;
+				goto out;
+			}
+		}
+	}
+
+out:
+	*merge_c_txn = best_c_txn;
+	*new_c_txn = target_c_txn;
+	return ret;
 }
 
 // TODO:: READ????

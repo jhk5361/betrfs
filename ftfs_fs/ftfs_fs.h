@@ -389,12 +389,21 @@ static inline void ftio_unlock_pages(struct ftio *ftio)
 		unlock_page((ftio->ft_io_vec + i)->fv_page);
 }
 
+#ifdef LIGHTFS
 #define ftfs_bstore_txn_begin(env, parent, txn, flags)	\
 		env->txn_begin(env, parent, txn, flags)
 #define ftfs_bstore_txn_commit(txn, flags)		\
 		txn->commit(txn, flags)
 #define ftfs_bstore_txn_abort(txn)			\
 		txn->abort(txn)
+#else
+#define ftfs_bstore_txn_begin(env, parent, txn, flags)	\
+		env->txn_begin(env, parent, txn, flags)
+#define ftfs_bstore_txn_commit(txn, flags)		\
+		txn->commit(txn, flags)
+#define ftfs_bstore_txn_abort(txn)			\
+		txn->abort(txn)
+#endif
 
 #define ftfs_bstore_flush_log(env)	env->log_flush(env, 0)
 #define ftfs_bstore_checkpoint(env)	env->txn_checkpoint(env, 0, 0, 0)
@@ -416,11 +425,20 @@ int ftfs_bstore_meta_del(DB *meta_db, DBT *meta_dbt, DB_TXN *txn);
 int ftfs_bstore_meta_readdir(DB *meta_db, DBT *meta_dbt, DB_TXN *txn,
                              struct dir_context *ctx);
 
-int ftfs_bstore_get(DB *data_db, DBT *data_dbt, DB_TXN *txn, void *buf);
+#ifdef LIGHTFS
+int ftfs_bstore_get(DB *data_db, DBT *meta_dbt, DBT *data_dbt, DB_TXN *txn, void *buf); //TODO
+int ftfs_bstore_put(DB *data_db, DBT *meta_dbt, DBT *data_dbt, DB_TXN *txn,
+                    const void *buf, size_t len, int is_seq); //TODO
+int ftfs_bstore_update(DB *data_db, DBT *meta_dbt, DBT *data_dbt, DB_TXN *txn,
+                       const void *buf, size_t size, loff_t offset); // TODO
+
+#else
+int ftfs_bstore_get(DB *data_db, DBT *data_dbt, DB_TXN *txn, void *buf); //TODO
 int ftfs_bstore_put(DB *data_db, DBT *data_dbt, DB_TXN *txn,
-                    const void *buf, size_t len, int is_seq);
+                    const void *buf, size_t len, int is_seq); //TODO
 int ftfs_bstore_update(DB *data_db, DBT *data_dbt, DB_TXN *txn,
-                       const void *buf, size_t size, loff_t offset);
+                       const void *buf, size_t size, loff_t offset); // TODO
+#endif
 // truncate a file in data_db (we dont do extend-like falloc in our truncate),
 // preserve offset bytes in block new_num, (offset == 0) means delete that block
 int ftfs_bstore_trunc(DB *data_db, DBT *meta_dbt, DB_TXN *txn,

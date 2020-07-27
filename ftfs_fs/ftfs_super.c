@@ -1218,6 +1218,7 @@ postpone_to_writepage:
 	} else {
 		meta_dbt = ftfs_get_read_lock(FTFS_I(inode));
 		TXN_GOTO_LABEL(retry);
+		
 		ftfs_bstore_txn_begin(sbi->db_env, NULL, &txn, TXN_MAY_WRITE);
 		ret = __ftfs_updatepage(sbi, inode, meta_dbt, page, copied, pos,
 		                        txn);

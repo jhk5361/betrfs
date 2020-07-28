@@ -1,8 +1,7 @@
 #ifndef __BLOOMFILTER_H__
 #define __BLOOMFILTER_H__
 
-#include <stdlib.h>
-#include <stdint.h>
+#include "ftfs_fs.h"
 
 struct bloomfilter {
 	unsigned int  m;

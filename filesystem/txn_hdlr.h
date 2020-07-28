@@ -1,16 +1,22 @@
 #ifndef __TXN_HDLR__
 #define __TXN_HDLR__
 
-#include <tokudb.h>
-#include <list.h>
+#include <linux/list.h>
 #include <linux/spinlock.h> 
+#include <linux/kernel.h>
+#include <linux/wait.h>
+#include <linux/signal.h>
+#include <linux/tqueue.h>
+#include <linux/sched.h>
 #include "bloomfilter.h"
+#include "tokudb.h"
 
 #define C_TXN_LIMIT_BYTES 2 * 1024 * 1024
 #define C_TXN_BLOOM_M_BYTES 308 // 512 items, p=0.1
 //#define C_TXN_BLOOM_M_BYTES 791 // 512 items, p=0.01
 #define C_TXN_BLOOM_K 3
-#define LIGHTFS_ORDER_MAX 3000000
+#define C_TXN_COMMITTING_LIMIT 16
+#define TXN_LIMIT 128 * 1024
 
 struct __lightfs_txn_buffer DB_TXN_BUF;
 struct __lightfs_c_txn DB_C_TXN;
@@ -32,7 +38,9 @@ struct __lightfs_c_txn {
 	struct list_head c_txn_list;
 	struct list_head txn_list;
 	struct list_head children;
+	uint16_t children_num;
 	uint32_t size;
+	uint16_t parents;
 	enum lightfs_txn_state state;
 	struct bloomfilter *filter;
 }
@@ -43,12 +51,17 @@ struct __lightfs_c_txn_list {
 }
 
 struct __lightfs_txn_hdlr {
+	struct task_struct *tsk;
+	wait_queue_head_t *wq;
 	uint32_t txn_cnt;
 	uint32_t ordered_c_txn_cnt;
 	uint32_t orderless_c_txn_cnt;
+	uint32_t transfering_c_txn_cnt;
 	struct list_head txn_list;
 	struct list_head ordered_c_txn_list;
 	struct list_head orderless_c_txn_list;
+	bool state;
+	spinlock_t txn_hdlr_spin;
 	spinlock_t txn_spin;
 	spinlock_t ordered_c_txn_spin;
 	spinlock_t orderless_c_txn_spin;
@@ -79,6 +92,11 @@ static inline int calc_txn_buf_size(DB_TXN_BUF *txn_buf)
 static inline int c_txn_is_available(DB_C_TXN *c_txn, DB_TXN *txn)
 {
 	return c_txn->size + txn->size > C_TXN_LIMIT_BYTES ? 0 : 1;
+}
+
+static inline int c_txn_available_bytes(DB_C_TXN *c_txn)
+{
+	return C_TXN_LIMIT_BYTES - c_txn->size;
 }
 
 static inline int diff_c_txn_and_txn(DB_C_TXN *c_txn, DB_TXN *txn)

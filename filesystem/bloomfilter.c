@@ -1,8 +1,4 @@
 #include "bloomfilter.h"
-
-#include <string.h>
-#include <unistd.h>
-
 #include "murmur3.h"
 
 #define bit_set(v,n)    ((v)[(n) >> 3] |= (0x1 << (0x7 - ((n) & 0x7))))

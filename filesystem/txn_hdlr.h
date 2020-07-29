@@ -17,6 +17,7 @@
 #define C_TXN_BLOOM_K 3
 #define C_TXN_COMMITTING_LIMIT 16
 #define TXN_LIMIT 128 * 1024
+#define TXN_THRESHOLD 64 * 1024
 
 struct __lightfs_txn_buffer DB_TXN_BUF;
 struct __lightfs_c_txn DB_C_TXN;
@@ -38,7 +39,6 @@ struct __lightfs_c_txn {
 	struct list_head c_txn_list;
 	struct list_head txn_list;
 	struct list_head children;
-	uint16_t children_num;
 	uint32_t size;
 	uint16_t parents;
 	enum lightfs_txn_state state;
@@ -52,21 +52,48 @@ struct __lightfs_c_txn_list {
 
 struct __lightfs_txn_hdlr {
 	struct task_struct *tsk;
-	wait_queue_head_t *wq;
+	wait_queue_head_t wq;
+	wait_queue_head_t txn_wq;
 	uint32_t txn_cnt;
 	uint32_t ordered_c_txn_cnt;
 	uint32_t orderless_c_txn_cnt;
-	uint32_t transfering_c_txn_cnt;
+	uint32_t committing_c_txn_cnt;
 	struct list_head txn_list;
 	struct list_head ordered_c_txn_list;
 	struct list_head orderless_c_txn_list;
+	struct list_head committed_c_txn_list;
 	bool state;
+	bool contention;
 	spinlock_t txn_hdlr_spin;
 	spinlock_t txn_spin;
 	spinlock_t ordered_c_txn_spin;
 	spinlock_t orderless_c_txn_spin;
-
+	spinlock_t committed_c_txn_spin;
 };
+
+static inline void txn_hdlr_alloc(struct __lightfs_txn_hdlr **__txn_hdlr)
+{
+	struct __lightfs_txn_hdlr *_txn_hdlr = (struct __lightfs_txn_hdlr *)kmalloc(sizeof(struct __lightfs_txn_hdlr), GFP_KERNEL);
+
+	_txn_hdlr->txn_cnt = 0;
+	_txn_hdlr->ordered_c_txn_cnt = 0;
+	_txn_hdlr->orderless_c_txn_cnt = 0;
+	_txn_hdlr->committing_c_txn_cnt = 0;
+	init_waitqueue_head(&_txn_hdlr->wq);
+	init_waitqueue_head(&_txn_hdlr->txn_wq);
+	INIT_LIST_HEAD(&_txn_hdlr->txn_list);
+	INIT_LIST_HEAD(&_txn_hdlr->ordered_c_txn_list);
+	INIT_LIST_HEAD(&_txn_hdlr->orderless_c_txn_list);
+	INIT_LIST_HEAD(&_txn_hdlr->committed_c_txn_list);
+	spin_lock_init(&_txn_hdlr->txn_hdlr_spin);
+	spin_lock_init(&_txn_hdlr->txn_spin);
+	spin_lock_init(&_txn_hdlr->ordered_c_txn_spin);
+	spin_lock_init(&_txn_hdlr->orderless_c_txn_spin);
+	spin_lock_init(&_txn_hdlr->committed_c_txn_spin);
+	_txn_hdlr->state = false;
+	_txn_hdlr->contention = false;
+	*__txn_hdlr = _txn_hdlr;
+}
 
 static inline void c_txn_list_alloc(DB_C_TXN_LIST **c_txn_list, DB_C_TXN *c_txn)
 {
@@ -119,6 +146,13 @@ static inline void txn_buf_setup(DB_TXN_BUF *txn_buf, const void *data, uint32_t
 			break;
 		default:
 	}
+}
+
+static inline void alloc_txn_buf_key_from_dbt(DB_TXN_BUF *txn_buf, DBT *dbt)
+{
+	txn_buf->key = kmalloc(dbt->size, GFP_KERNEL);
+	memcpy(txn_buf->key, dbt->data, dbt->size);
+	txn_buf->key_len = dbt_size;
 }
 
 int lightfs_bstore_txn_begin(DB_TXN *, DB_TXN **, uint32_t);

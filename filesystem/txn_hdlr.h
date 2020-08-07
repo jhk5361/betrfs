@@ -8,6 +8,7 @@
 #include <linux/signal.h>
 #include <linux/tqueue.h>
 #include <linux/sched.h>
+#include <linux/completion.h>
 #include "bloomfilter.h"
 #include "tokudb.h"
 
@@ -31,7 +32,9 @@ struct __lightfs_txn_buffer {
 	uint32_t len;
 	uint32_t tid;
 	uint8_t type;
-	char buf[PAGE_SIZE];
+	//char buf[PAGE_SIZE];
+	struct completion *completionp;
+	char *buf;
 };
 
 struct __lightfs_c_txn {
@@ -133,16 +136,18 @@ static inline int diff_c_txn_and_txn(DB_C_TXN *c_txn, DB_TXN *txn)
 
 static inline void txn_buf_setup(DB_TXN_BUF *txn_buf, const void *data, uint32_t off, uint32_t size)
 {
-	char data_buf = (char *)data_buf;
-	memcpy(txn_buf->buf+off, data_buf+off, size);
+	char data_buf = (char *)data;
 	txn_buf->off = off;
 	txn_buf->len = size;
 	txn_buf->next = NULL;
 
 	// TODO
 	switch (flags) {
-		case asd:
-			txn_buf = DB_WRITE;
+		case LIGHTFS_GET:
+			txn_buf->buf = data;
+			break;
+		case LIGHTFS_SET:
+			memcpy(txn_buf->buf+off, data_buf+off, size);
 			break;
 		default:
 	}

@@ -2,6 +2,7 @@
 #include <linux/delay.h>
 #include <linux/signal.h>
 #include <linux/sched/signal.h>
+#include <linux/completion.h>
 
 #include "txn_hdlr.h"
 
@@ -10,6 +11,8 @@
 static struct kmem_cache *lightfs_c_txn_cachep;
 static struct kmem_cache *lightfs_txn_cachep;
 static struct kmem_cache *lightfs_txn_buf_cachep;
+static struct kmem_cache *lightfs_buf_cachep;
+static struct kmem_cache *lightfs_completion_cachep;
 
 static struct __lightfs_txn_hdlr *txn_hdlr;
 
@@ -50,12 +53,24 @@ static void lightfs_txn_free(DB_TXN *txn) {
 static void lightfs_txn_buf_init_once(void *txn_buf)
 {
 	struct DB_TXN_BUF *_txn_buf = txn_buf;
+	//txn_buf->buf = NULL;
 	INIT_LIST_HEAD(&_txn_buf->txn_buf_list);
 }
 
 static void lightfs_txn_buf_free(DB_TXN_BUF *txn_buf) {
 	kfree(txn_buf->key);
 	kmem_cache_free(lightfs_txn_buf_cachep, txn_buf);
+}
+
+static void lightfs_completion_init_once(void *completionp)
+{
+	//struct completion *completionp = (struct completion *)_completion;
+	init_completion((struct completion *)completionp);
+}
+
+static void lightfs_completion_free(struct completion *completionp)
+{
+	kmem_cache_free(lightfs_completion_cachep, completionp);
 }
 
 static bool lightfs_bstore_txn_check()
@@ -100,19 +115,46 @@ int lightfs_bstore_txn_begin(DB_TXN *parent, DB_TXN **txn, uint32_t flags)
 	return 0;
 }
 
-int lightfs_bstore_txn_insert(DB_TXN *txn, DBT *key, DBT *value, uint32_t off, uint32_t flags)
+int lightfs_bstore_txn_get(DB_TXN *txn, DBT *key, DBT *value, uint32_t off, enum lightfs_req_type type)
 {
 	DB_TXN_BUF *txn_buf;
 
 	txn_buf = kmem_cache_alloc(lightfs_txn_buf_cachep, GFP_KERNEL);
+	txn_buf->completionp = kmem_cache_alloc(lightfs_completion_cachep, GFP_KERNEL);
+	//txn_buf->buf = kmem_cache_alloc(lightfs_buf_cachep, GFP_KERNEL);
+	txn_buf_setup(txn_buf, value->data, off, value->size, type);
+	alloc_txn_buf_from_dbt(txn_buf, key);
+
+	lightfs_bstore_txn_buf_read(txn_buf);
+
+	wait_for_completion(txn_buf->completionp);
+
+	lightfs_completion_free(txn_buf->completionp);
+	lightfs_txn_buf_free(txn_buf);
+
+	return 0;
+}
+
+void *lightfs_bstore_txn_get_cb(void *completion)
+{
+	completion(completion);
+	return NULL;
+}
+
+int lightfs_bstore_txn_insert(DB_TXN *txn, DBT *key, DBT *value, uint32_t off, enum lightfs_req_type type)
+{
+	DB_TXN_BUF *txn_buf;
+
+	txn_buf = kmem_cache_alloc(lightfs_txn_buf_cachep, GFP_KERNEL);
+	txn_buf->buf = (char*)kmem_cache_alooc(lightfs_buf_cachep, GFP_KERNEL);
 	// lightfs_txn_buf_init_once
-	txn_buf_setup(txn_buf, value->data, off, value->size);
+	txn_buf_setup(txn_buf, value->data, off, value->size, type);
 	alloc_txn_buf_key_from_dbt(txn_buf, key);
 
 	txn->cnt++;
 	txn->size += calc_txn_buf_size(txn_buf);
 	list_add_tail(&txn_buf->txn_buf_list, &txn->txn_buf_list);
-	txn->state = TXN_INSERTING;
+	//txn->state = TXN_INSERTING;
 
 	return 0;
 }
@@ -177,6 +219,7 @@ static int lightfs_c_txn_destroy(DB_C_TXN *c_txn, enum lightfs_c_txn_state c_txn
 		while(!list_empty(&txn->txn_buf_list)) {
 			txn_buf = list_first_entry(&txn->txn_buf_list, DB_TXN_BUF, txn_buf_list);
 			list_del(&txn_buf->txn_buf_list);
+			kmem_cache_free(lightfs_buf_cachep, txn_buf->buf); //TODO
 			lightfs_txn_buf_free(txn_buf);
 		}
 		list_del(&txn->txn_list);
@@ -199,7 +242,7 @@ static int lightfs_c_txn_insert(DB_C_TXN *c_txn, DB_TXN *txn)
 	txn_hdlr->txn_cnt--;
 	spin_unlock(&txn_hdlr->txn_spin);
 	c_txn->size += txn->size;
-	c_txn->state = TXN_INSERTING;
+	//c_txn->state = TXN_INSERTING;
 
 	return 0;
 }
@@ -444,10 +487,32 @@ int lightfs_txn_hdlr_init(void)
 		goto out_free_txn_buf_cachep;
 	}
 
+	lightfs_buf_cachep = kmem_cache_create("lightfs_buf", PAGE_SIZE, 0, SLAB_RECLAIM_ACCOUNT | SLAB_MEM_SPREAD, NULL);
+
+	if (!lightfs_buf_cachep) {
+		printk(KERN_ERR "LIGHTFS ERROR: Failed to initialize buffer cache.\n");
+		ret = -ENOMEM;
+		goto out_free_buf_cachep;
+	}
+
+	lightfs_completion_cachep = kmem_cache_create("lightfs_buf", sizeof(struct completion), 0, SLAB_RECLAIM_ACCOUNT | SLAB_MEM_SPREAD, lightfs_completion_init_once);
+
+	if (!lightfs_completion_cachep) {
+		printk(KERN_ERR "LIGHTFS ERROR: Failed to initialize buffer cache.\n");
+		ret = -ENOMEM;
+		goto out_free_completion_cachep;
+	}
+
+
+
 	txn_hdlr->tsk = (struct task_struct *)kthread_run(lightfs_txn_hdlr_run, NULL, "lightfs_txn_hdlr");
 
 	return 0;
 
+out_free_completion_cachep:
+	kmem_cache_destroy(lightfs_completion_cachep);
+out_free_buf_cachep:
+	kmem_cache_destroy(lightfs_buf_cachep);
 out_free_txn_buf_cachep:
 	kmem_cache_destroy(lightfs_txn_buf_cachep);
 out_free_txn_cachep:

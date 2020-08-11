@@ -19,6 +19,8 @@
 #define C_TXN_COMMITTING_LIMIT 16
 #define TXN_LIMIT 128 * 1024
 #define TXN_THRESHOLD 64 * 1024
+#define DBC_LIMIT 1024
+#define ITER_BUF_SIZE 32 * 1024
 
 struct __lightfs_txn_buffer DB_TXN_BUF;
 struct __lightfs_c_txn DB_C_TXN;
@@ -35,6 +37,9 @@ struct __lightfs_txn_buffer {
 	//char buf[PAGE_SIZE];
 	struct completion *completionp;
 	char *buf;
+	void * (*txn_buf_cb)(void *data);
+	uint32_t ret;
+	uint8_t ge;
 };
 
 struct __lightfs_c_txn {
@@ -134,7 +139,7 @@ static inline int diff_c_txn_and_txn(DB_C_TXN *c_txn, DB_TXN *txn)
 	return C_TXN_LIMIT_BYTES - c_txn->size - txn->size;
 }
 
-static inline void txn_buf_setup(DB_TXN_BUF *txn_buf, const void *data, uint32_t off, uint32_t size)
+static inline void txn_buf_setup(DB_TXN_BUF *txn_buf, const void *data, uint32_t off, uint32_t size, enum lightfs_req_type type)
 {
 	char data_buf = (char *)data;
 	txn_buf->off = off;
@@ -142,7 +147,7 @@ static inline void txn_buf_setup(DB_TXN_BUF *txn_buf, const void *data, uint32_t
 	txn_buf->next = NULL;
 
 	// TODO
-	switch (flags) {
+	switch (type) {
 		case LIGHTFS_GET:
 			txn_buf->buf = data;
 			break;
@@ -158,6 +163,15 @@ static inline void alloc_txn_buf_key_from_dbt(DB_TXN_BUF *txn_buf, DBT *dbt)
 	txn_buf->key = kmalloc(dbt->size, GFP_KERNEL);
 	memcpy(txn_buf->key, dbt->data, dbt->size);
 	txn_buf->key_len = dbt_size;
+}
+
+
+static inline uint32_t copy_dbt_from_dbc(DBC *dbc, DBT *dbt)
+{
+	dbt->size = *((uint32_t *)(dbc->buf + dbc->idx);
+	memcpy(dbt->data, dbc->buf + dbc->idx + sizeof(uint32_t), dbt->size);
+	
+	return sizeof(uint32_t) + dbt->size;
 }
 
 int lightfs_bstore_txn_begin(DB_TXN *, DB_TXN **, uint32_t);

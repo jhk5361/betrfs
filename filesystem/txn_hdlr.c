@@ -61,6 +61,9 @@ static void lightfs_txn_buf_init_once(void *txn_buf)
 
 static void lightfs_txn_buf_free(DB_TXN_BUF *txn_buf) {
 	kfree(txn_buf->key);
+	if (txn_buf->buf) {
+		kmem_cache_free(lightfs_buf_cachep, txn_buf->buf);
+	}
 	kmem_cache_free(lightfs_txn_buf_cachep, txn_buf);
 }
 
@@ -126,6 +129,7 @@ int lightfs_bstore_txn_begin(DB_TXN *parent, DB_TXN **txn, uint32_t flags)
 	
 	spin_lock(&txn_hdlr->txn_list)
 	list_add_tail(&((*txn)->txn_list), &txn_hdlr->txn_list);
+	txn->txn_id = txn_hdlr->txn_id++;
 	txn_hdlr->txn_cnt++;
 	spin_unlock(&txn_hdlr->txn_list)
 
@@ -141,27 +145,33 @@ void *lightfs_bstore_txn_get_cb(void *completion)
 int lightfs_bstore_txn_get(DB_TXN *txn, DBT *key, DBT *value, uint32_t off, enum lightfs_req_type type)
 {
 	DB_TXN_BUF *txn_buf;
+	int ret = 0;
 
 	txn_buf = kmem_cache_alloc(lightfs_txn_buf_cachep, GFP_KERNEL);
+	txn_buf->txn_id = txn->txn_id;
 	txn_buf->completionp = kmem_cache_alloc(lightfs_completion_cachep, GFP_KERNEL);
-	//txn_buf->buf = kmem_cache_alloc(lightfs_buf_cachep, GFP_KERNEL);
 	txn_buf_setup(txn_buf, value->data, off, value->size, type);
 	alloc_txn_buf_key_from_dbt(txn_buf, key);
 
 	txn_buf->cb = lightfs_bstore_txn_get_cb;
+#ifndef EMULATION
 	lightfs_bstore_txn_buf_read(txn_buf);
-
 	wait_for_completion(txn_buf->completionp);
-
-
 	lightfs_completion_free(txn_buf->completionp);
+#else
+	ret = rb_get(NULL, txn, key, value, 0);
+#endif
+
+
 	lightfs_txn_buf_free(txn_buf);
 
+#ifndef EMULATION
 	if (txn_buf->ret == DB_NOTFOUND) {
-		return DB_NOTFOUND;
+		ret = DB_NOTFOUND;
 	}
+#endif
 
-	return 0;
+	return ret;
 }
 
 void *lightfs_bstore_dbc_cb(void *completion)
@@ -171,18 +181,24 @@ void *lightfs_bstore_dbc_cb(void *completion)
 }
 
 
-int lightfs_bstore_dbc_cursor(DB_TXN *txn, DBC ** dbc)
+int lightfs_bstore_dbc_cursor(DB_TXN *txn, DBC **dbc)
 {
 	DB_TXN_BUF *txn_buf;
 	DBC *cursor;
 
 	cursor = *dbc = kmem_cache_alloc(lightfs_dbc_cachep, GFP_KERNEL);
 	txn_buf = kmem_cache_alloc(lightfs_txn_buf_cachep, GFP_KERNEL);
+	txn_buf->txn_id = txn->txn_id;
 	txn_buf->completionp = kmem_cache_alloc(lightfs_completion_cachep, GFP_KERNEL);
 	txn_buf->cb = lightfs_bstore_dbc_cb;
 
 	txn_buf_setup(txn_buf, cursor->buf, 0, ITER_BUF_SIZE, type);
 	cursor->txn_buf = txn_buf;
+	cursor->c_get = lightfs_bstore_dbc_c_get;
+	cursor->c_getf_set_range = lightfs_bstore_dbc_c_getf_set_range;
+	cursor->c_getf_next = lightfs_bstore_dbc_c_getf_next;
+	cursor->close = lightfs_bstore_dbc_close;
+
 	
 	return 0;
 }
@@ -190,9 +206,14 @@ int lightfs_bstore_dbc_cursor(DB_TXN *txn, DBC ** dbc)
 
 int lightfs_bstore_dbc_c_get(DBC *dbc, DBT *key, DBT *value, uint32_t flags)
 {
+	uint32_t idx = 0;
 	DB_TXN_BUF *txn_buf = dbc->txn_buf;
 	if (dbc->idx >= dbc->buf_len) {
-		txn_buf->ge = 1;
+		if (flags == DB_SET_RANGE) {
+			txn_buf->ge = 1;
+		} else {
+			txn_buf->ge = 0;
+		}
 		alloc_txn_buf_key_from_dbt(txn_buf, key);
 		lightfs_bstore_txn_buf_iter_next(txn_buf);
 		wait_for_completion(txn_buf->completionp);
@@ -202,8 +223,11 @@ int lightfs_bstore_dbc_c_get(DBC *dbc, DBT *key, DBT *value, uint32_t flags)
 		}
 	}
 	//TODO end-of-iter
-
-	dbc->idx += copy_dbt_from_dbc(dbc, key);
+	idx = copy_dbt_from_dbc(dbc, key);
+	if (idx == 0) {
+		return DB_NOTFOUND;
+	}
+	dbc->idx += idx;
 	dbc->idx += copy_dbt_from_dbc(dbc, value);
 
 	return 0;
@@ -212,6 +236,7 @@ int lightfs_bstore_dbc_c_get(DBC *dbc, DBT *key, DBT *value, uint32_t flags)
 //greater or equal
 int lightfs_bstore_dbc_c_getf_set_range(DBC *dbc, uint32_t flags, DBT *key, YDB_CALLBACK_FUNCTION f, void *extra)
 {
+	uint32_t idx = 0;
 	DB_TXN_BUF *txn_buf = dbc->txn_buf;
 	if (dbc->idx >= dbc->buf_len) {
 		txn_buf->ge = 1;
@@ -224,15 +249,20 @@ int lightfs_bstore_dbc_c_getf_set_range(DBC *dbc, uint32_t flags, DBT *key, YDB_
 		}
 	}
 	//TODO end-of-iter
-
-	dbc->idx += copy_dbt_from_dbc(dbc, &dbc->key);
+	idx = copy_dbt_from_dbc(dbc, &dbc->key);
+	if (idx == 0) {
+		return DB_NOTFOUND;
+	}
+	dbc->idx += idx;
 	dbc->idx += copy_dbt_from_dbc(dbc, &dbc->value);
+	f(&dbc->key, &dbc->value, extra);
 
 	return 0;
 }
 
 int lightfs_bstore_dbc_c_getf_next(DBC *dbc, uint32_t flags, YDB_CALLBACK_FUNCTION f, void *extra)
 {
+	uint32_t idx = 0;
 	DB_TXN_BUF *txn_buf = dbc->txn_buf;
 	// NEXT, SET_RANGE
 	if (dbc->idx >= dbc->buf_len) {
@@ -246,9 +276,13 @@ int lightfs_bstore_dbc_c_getf_next(DBC *dbc, uint32_t flags, YDB_CALLBACK_FUNCTI
 		}
 	}
 	//TODO end-of-iter
-
-	dbc->idx += copy_dbt_from_dbc(dbc, &dbc->key);
+	idx = copy_dbt_from_dbc(dbc, &dbc->key);
+	if (idx == 0) {
+		return DB_NOTFOUND;
+	}
+	dbc->idx += idx;
 	dbc->idx += copy_dbt_from_dbc(dbc, &dbc->value);
+	f(&dbc->key, &dbc->value, extra);
 
 	return 0;
 }
@@ -266,9 +300,14 @@ int lightfs_bstore_txn_insert(DB_TXN *txn, DBT *key, DBT *value, uint32_t off, e
 	DB_TXN_BUF *txn_buf;
 
 	txn_buf = kmem_cache_alloc(lightfs_txn_buf_cachep, GFP_KERNEL);
-	txn_buf->buf = (char*)kmem_cache_alooc(lightfs_buf_cachep, GFP_KERNEL);
+	txn_buf->txn_id = txn->txn_id;
+	if (value) { // SET, SEQ_SET, UPDATE
+		txn_buf->buf = (char*)kmem_cache_alloc(lightfs_buf_cachep, GFP_KERNEL);
 	// lightfs_txn_buf_init_once
-	txn_buf_setup(txn_buf, value->data, off, value->size, type);
+		txn_buf_setup_cpy(txn_buf, value->data, off, value->size, type);
+	} else {
+		txn_buf->buf = NULL;
+	}
 	alloc_txn_buf_key_from_dbt(txn_buf, key);
 
 	txn->cnt++;
@@ -339,7 +378,6 @@ static int lightfs_c_txn_destroy(DB_C_TXN *c_txn, enum lightfs_c_txn_state c_txn
 		while(!list_empty(&txn->txn_buf_list)) {
 			txn_buf = list_first_entry(&txn->txn_buf_list, DB_TXN_BUF, txn_buf_list);
 			list_del(&txn_buf->txn_buf_list);
-			kmem_cache_free(lightfs_buf_cachep, txn_buf->buf); //TODO
 			lightfs_txn_buf_free(txn_buf);
 		}
 		list_del(&txn->txn_list);

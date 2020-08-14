@@ -235,19 +235,24 @@ static void db_set_val(const DBT *new_val, void *set_extra)
 	}
 }
 
-static int db_update(DB *db, DB_TXN *txnid, const DBT *key, const DBT *extra, uint32_t flags)
+static int db_update(DB *db, DB_TXN *txnid, const DBT *key, const DBT *value, loff_t offset, uint32_t flags)
 {
+	char *buf;
 	struct rb_kv_node *node = find_val_with_key(db, key);
 	struct set_val_info info;
 	int ret;
 	DBT *val = (node == NULL) ? NULL : &node->val;
+	buf = val->data;
 
-	info.db = db;
-	info.key = key;
-	info.node = node;
-	ret = db->dbenv->i->update_cb(db, key, val, extra, db_set_val, &info);
+	memcpy(buf+offset, value->data, value->size);
+	if (val->size > value->size) {
+		val->size = value->size;
+	}
 
-	return ret;
+
+	//ret = db->dbenv->i->update_cb(db, key, val, extra, db_set_val, &info);
+
+	return 0;
 }
 
 static void free_rb_tree(struct rb_node *node)
@@ -379,6 +384,47 @@ static int dbc_c_getf_current(DBC *c, uint32_t flag, YDB_CALLBACK_FUNCTION f, vo
 	return r;
 }
 
+static int dbc_c_get(DBC *c, DBT *key, DBT *value, uint32_t flags)
+{
+	struct __toku_dbc_wrap *wrap;
+	if (flags == DB_SET_RANGE) {
+		struct rb_kv_node *node = find_val_with_key_ge(c->dbp, key);
+		if (node == NULL) {
+			return DB_NOTFOUND;
+		}
+		wrap = container_of(c, struct __toku_dbc_wrap, dbc);
+		wrap->node = node;
+
+		memcpy(key->data, &node->key->data, node->key->size);
+		key->size = node->key->size;
+		memcpy(value->data, &node->value->data, node->value->size);
+		value->size = node->value->size;
+	} else {
+		struct rb_node *node= &(wrap->node->node);
+		wrap = container_of(c, struct __toku_dbc_wrap, dbc);
+		node = rb_next(node); /* logical next */
+		if (node == NULL) {
+			wrap->node = NULL;
+			return DB_NOTFOUND;
+		}
+	/* since we only consider right bound in ftfs, simply do this */
+		if (wrap->right != NULL) {
+			struct rb_kv_node *kv_node = container_of(node, struct rb_kv_node, node);
+			if (c->dbp->dbenv->i->bt_compare(c->dbp, &kv_node->key, wrap->right) > 0) {
+				wrap->node = NULL;
+				return DB_NOTFOUND;
+			}
+		}
+		wrap->node = container_of(node, struct rb_kv_node, node);
+		memcpy(key->data, &wrap->node->key->data, wrap->node->key->size);
+		key->size = wrap->node->key->size;
+		memcpy(value->data, &wrap->node->value->data, wrap->node->value->size);
+		value->size = wrap->node->value->size;
+	}
+	
+	return 0;
+}
+
 static int db_cursor(DB *db, DB_TXN *txnid, DBC **cursorp, uint32_t flags)
 {
 	struct __toku_dbc_wrap *wrap = kmalloc(sizeof(struct __toku_dbc_wrap), GFP_KERNEL);
@@ -394,6 +440,7 @@ static int db_cursor(DB *db, DB_TXN *txnid, DBC **cursorp, uint32_t flags)
 	(*cursorp)->dbp = db;
 	(*cursorp)->c_getf_set_range = dbc_c_getf_set_range;
 	(*cursorp)->c_getf_next = dbc_c_getf_next;
+	(*cursorp)->c_get = dbc_c_get;
 	(*cursorp)->c_close = dbc_c_close;
 	(*cursorp)->c_set_bounds = dbc_c_set_bounds;
 	(*cursorp)->c_getf_current = dbc_c_getf_current;
@@ -403,32 +450,18 @@ static int db_cursor(DB *db, DB_TXN *txnid, DBC **cursorp, uint32_t flags)
 
 int db_env_create(DB_ENV **envp, uint32_t flags)
 {
-	*envp = kmalloc(sizeof(DB_ENV), GFP_KERNEL);
-	if (*envp == NULL) {
-		return -ENOMEM;
-	}
 	(*envp)->i = kmalloc(sizeof(struct __toku_db_env_internal), GFP_KERNEL);
 	if ((*envp)->i == NULL) {
 		kfree(*envp);
 		return -ENOMEM;
 	}
 	INIT_LIST_HEAD(&((*envp)->i->rbtree_list));
-	/* redirect some operations in use */
-	(*envp)->set_cachesize = db_env_set_cachesize;
-	(*envp)->set_update = db_env_set_update;
-	//(*envp)->set_default_bt_compare = db_env_set_default_bt_compare;
-	(*envp)->open = db_env_open;
-	(*envp)->close = db_env_close;
 
 	return 0;
 }
 
 int db_create(DB **db, DB_ENV *env, uint32_t flags)
 {
-	*db = kmalloc(sizeof(DB), GFP_KERNEL);
-	if (*db == NULL) {
-		return -ENOMEM;
-	}
 	(*db)->i = kmalloc(sizeof(struct __toku_db_internal), GFP_KERNEL);
 	if ((*db)->i == NULL) {
 		kfree(*db);
@@ -437,15 +470,6 @@ int db_create(DB **db, DB_ENV *env, uint32_t flags)
 	INIT_LIST_HEAD(&(*db)->i->rbtree_list);
 	list_add(&(*db)->i->rbtree_list, &env->i->rbtree_list);
 	(*db)->i->kv = RB_ROOT;
-	(*db)->dbenv = env;
-
-	(*db)->open = db_open;
-	(*db)->get = db_get;
-	(*db)->update = db_update;
-	(*db)->cursor = db_cursor;
-	(*db)->close = db_close;
-	(*db)->put = db_put;
-	(*db)->del = db_del;
 
 	return 0;
 }

@@ -899,6 +899,7 @@ int ftfs_bstore_get(DB *data_db, DBT *data_dbt, DB_TXN *txn, void *buf)
 
 	dbt_setup(&value, buf, FTFS_BSTORE_BLOCKSIZE);
 
+	//TODO: memset 처리
 	ret = data_db->get(data_db, txn, data_dbt, &value, DB_GET_FLAGS);
 	if (!ret && value.size < FTFS_BSTORE_BLOCKSIZE)
 		memset(buf + value.size, 0, FTFS_BSTORE_BLOCKSIZE - value.size);
@@ -932,6 +933,7 @@ int ftfs_bstore_update(DB *data_db, DBT *data_dbt, DB_TXN *txn,
 	struct block_update_cb_info *info;
 	size_t info_size = sizeof(struct block_update_cb_info) + size;
 
+	//TODO: buf, offset
 	info = kmalloc(info_size, GFP_KERNEL);
 	if (!info)
 		return -ENOMEM;

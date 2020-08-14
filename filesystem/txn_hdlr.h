@@ -27,6 +27,7 @@ struct __lightfs_c_txn DB_C_TXN;
 struct __lightfs_c_txn_list DB_C_TXN_LIST;
 
 struct __lightfs_txn_buffer {
+	uint32_t txn_id;
 	struct list_head txn_buf_list;
 	char *key;
 	uint16_t key_len;
@@ -62,6 +63,7 @@ struct __lightfs_txn_hdlr {
 	struct task_struct *tsk;
 	wait_queue_head_t wq;
 	wait_queue_head_t txn_wq;
+	uint32_t txn_id;
 	uint32_t txn_cnt;
 	uint32_t ordered_c_txn_cnt;
 	uint32_t orderless_c_txn_cnt;
@@ -83,6 +85,7 @@ static inline void txn_hdlr_alloc(struct __lightfs_txn_hdlr **__txn_hdlr)
 {
 	struct __lightfs_txn_hdlr *_txn_hdlr = (struct __lightfs_txn_hdlr *)kmalloc(sizeof(struct __lightfs_txn_hdlr), GFP_KERNEL);
 
+	_txn_hdlr->txn_id = 0;
 	_txn_hdlr->txn_cnt = 0;
 	_txn_hdlr->ordered_c_txn_cnt = 0;
 	_txn_hdlr->orderless_c_txn_cnt = 0;
@@ -141,21 +144,17 @@ static inline int diff_c_txn_and_txn(DB_C_TXN *c_txn, DB_TXN *txn)
 
 static inline void txn_buf_setup(DB_TXN_BUF *txn_buf, const void *data, uint32_t off, uint32_t size, enum lightfs_req_type type)
 {
+	txn_buf->off = off;
+	txn_buf->len = size;
+	txn_buf->buf = (char*)data;
+}
+
+static inline void txn_buf_setup_cpy(DB_TXN_BUF *txn_buf, const void *data, uint32_t off, uint32_t size, enum lightfs_req_type type)
+{
 	char data_buf = (char *)data;
 	txn_buf->off = off;
 	txn_buf->len = size;
-	txn_buf->next = NULL;
-
-	// TODO
-	switch (type) {
-		case LIGHTFS_GET:
-			txn_buf->buf = data;
-			break;
-		case LIGHTFS_SET:
-			memcpy(txn_buf->buf+off, data_buf+off, size);
-			break;
-		default:
-	}
+	memcpy(txn_buf->buf+off, data_buf, size);
 }
 
 static inline void alloc_txn_buf_key_from_dbt(DB_TXN_BUF *txn_buf, DBT *dbt)

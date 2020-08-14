@@ -391,11 +391,11 @@ static inline void ftio_unlock_pages(struct ftio *ftio)
 
 #ifdef LIGHTFS
 #define ftfs_bstore_txn_begin(env, parent, txn, flags)	\
-		lightfs_bstore_txn_begin(parent, txn, flags)
+		env->txn_begin(env, parent, txn, flags)
 #define ftfs_bstore_txn_commit(txn, flags)		\
-		lightfs_bstore_txn_commit(txn, flags)
+		txn->commit(txn, flags)
 #define ftfs_bstore_txn_abort(txn)			\
-		lightfs_bstore_txn_abort(txn)
+		txn->abort(txn)
 #else
 #define ftfs_bstore_txn_begin(env, parent, txn, flags)	\
 		env->txn_begin(env, parent, txn, flags)

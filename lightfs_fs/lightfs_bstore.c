@@ -5,7 +5,7 @@
 #include <linux/slab.h>
 
 #include "ftfs_fs.h"
-#include "txn_hdlr.h"
+#include "lightfs_txn_hdlr.h"
 #include "lightfs_db.h"
 #include "lightfs_db_env.h"
 
@@ -927,7 +927,7 @@ int ftfs_bstore_put(DB *data_db, DBT *data_dbt, DB_TXN *txn,
 	dbt_setup(&value, buf, len);
 
 	ret = is_seq ?
-	      data_db->seq_put(data_db, txn, data_dbt, &value, LIGHTFS_DATA_SEQSET) :
+	      data_db->seq_put(data_db, txn, data_dbt, &value, LIGHTFS_DATA_SEQ_SET) :
 	      data_db->put(data_db, txn, data_dbt, &value, LIGHTFS_DATA_SET);
 
 	return ret;
@@ -939,7 +939,7 @@ int ftfs_bstore_update(DB *data_db, DBT *data_dbt, DB_TXN *txn,
 	int ret;
 	DBT value;
 
-	dbt_setup(&value, buf, len);
+	dbt_setup(&value, buf, size);
 
 	ret = data_db->update(data_db, txn, data_dbt, &value, offset, LIGHTFS_DATA_UPDATE);
 
@@ -972,9 +972,9 @@ int ftfs_bstore_trunc(DB *data_db, DBT *meta_dbt,
 
 	if (!ret && offset) {
 		char *buf;
-		buf = kmalloc(PAGESIZE-offset, GFP_KERNEL);
-		memset(buf, 0, PAGESIZE-offset);
-		dbt_setup(&value, buf, PAGESIZE-offset);
+		buf = kmalloc(PAGE_SIZE-offset, GFP_KERNEL);
+		memset(buf, 0, PAGE_SIZE-offset);
+		dbt_setup(&value, buf, PAGE_SIZE-offset);
 
 		ftfs_data_key_set_blocknum(((char *)min_data_key_dbt.data),
 		                           min_data_key_dbt.size, new_num);

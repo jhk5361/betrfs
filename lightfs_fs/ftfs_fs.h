@@ -389,13 +389,18 @@ static inline void ftio_unlock_pages(struct ftio *ftio)
 		unlock_page((ftio->ft_io_vec + i)->fv_page);
 }
 
+
+
 #ifdef LIGHTFS
+int lightfs_bstore_txn_begin(DB_TXN *, DB_TXN **, uint32_t);
+int lightfs_bstore_txn_commit(DB_TXN *, uint32_t);
+int lightfs_bstore_txn_abort(DB_TXN *);
 #define ftfs_bstore_txn_begin(env, parent, txn, flags)	\
-		env->txn_begin(env, parent, txn, flags)
+		lightfs_bstore_txn_begin(parent, txn, flags)
 #define ftfs_bstore_txn_commit(txn, flags)		\
-		txn->commit(txn, flags)
+		lightfs_bstore_txn_commit(txn, flags)
 #define ftfs_bstore_txn_abort(txn)			\
-		txn->abort(txn)
+		lightfs_bstore_txn_abort(txn)
 #else
 #define ftfs_bstore_txn_begin(env, parent, txn, flags)	\
 		env->txn_begin(env, parent, txn, flags)
@@ -426,10 +431,10 @@ int ftfs_bstore_meta_readdir(DB *meta_db, DBT *meta_dbt, DB_TXN *txn,
                              struct dir_context *ctx);
 
 #ifdef LIGHTFS
-int ftfs_bstore_get(DB *data_db, DBT *meta_dbt, DBT *data_dbt, DB_TXN *txn, void *buf); //TODO
-int ftfs_bstore_put(DB *data_db, DBT *meta_dbt, DBT *data_dbt, DB_TXN *txn,
+int ftfs_bstore_get(DB *data_db, DBT *data_dbt, DB_TXN *txn, void *buf); //TODO
+int ftfs_bstore_put(DB *data_db, DBT *data_dbt, DB_TXN *txn,
                     const void *buf, size_t len, int is_seq); //TODO
-int ftfs_bstore_update(DB *data_db, DBT *meta_dbt, DBT *data_dbt, DB_TXN *txn,
+int ftfs_bstore_update(DB *data_db, DBT *data_dbt, DB_TXN *txn,
                        const void *buf, size_t size, loff_t offset); // TODO
 
 #else

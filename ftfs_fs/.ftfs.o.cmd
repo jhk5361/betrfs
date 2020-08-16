@@ -1,0 +1,1 @@
+cmd_/home/koo/src/betrfs/ftfs_fs/ftfs.o := ld -m elf_x86_64 -z max-page-size=0x200000   -r -o /home/koo/src/betrfs/ftfs_fs/ftfs.o /home/koo/src/betrfs/ftfs_fs/ftfs_super.o /home/koo/src/betrfs/ftfs_fs/ftfs_bstore.o /home/koo/src/betrfs/ftfs_fs/rbtreekv.o /home/koo/src/betrfs/ftfs_fs/ftfs_module.o 

@@ -6,11 +6,11 @@
 #include <linux/kernel.h>
 #include <linux/wait.h>
 #include <linux/signal.h>
-#include <linux/tqueue.h>
 #include <linux/sched.h>
 #include <linux/completion.h>
 #include "bloomfilter.h"
 #include "tokudb.h"
+#include "lightfs.h"
 
 #define C_TXN_LIMIT_BYTES 2 * 1024 * 1024
 #define C_TXN_BLOOM_M_BYTES 308 // 512 items, p=0.1
@@ -22,65 +22,6 @@
 #define DBC_LIMIT 1024
 #define ITER_BUF_SIZE 32 * 1024
 
-typedef struct __lightfs_txn_buffer DB_TXN_BUF;
-typedef struct __lightfs_c_txn DB_C_TXN;
-typedef struct __lightfs_c_txn_list DB_C_TXN_LIST;
-
-struct __lightfs_txn_buffer {
-	uint32_t txn_id;
-	struct list_head txn_buf_list;
-	char *key;
-	uint16_t key_len;
-	uint32_t off;
-	uint32_t len;
-	uint32_t tid;
-	uint8_t type;
-	//char buf[PAGE_SIZE];
-	struct completion *completionp;
-	char *buf;
-	void * (*txn_buf_cb)(void *data);
-	uint32_t ret;
-	uint8_t ge;
-};
-
-struct __lightfs_c_txn {
-	uint32_t tid;
-	struct list_head c_txn_list;
-	struct list_head txn_list;
-	struct list_head children;
-	uint32_t size;
-	uint16_t parents;
-	enum lightfs_txn_state state;
-	struct bloomfilter *filter;
-}
-
-struct __lightfs_c_txn_list {
-	DB_C_TXN *c_txn_ptr;
-	struct list_head c_txn_list;
-}
-
-struct __lightfs_txn_hdlr {
-	struct task_struct *tsk;
-	wait_queue_head_t wq;
-	wait_queue_head_t txn_wq;
-	uint32_t txn_id;
-	uint32_t txn_cnt;
-	uint32_t ordered_c_txn_cnt;
-	uint32_t orderless_c_txn_cnt;
-	uint32_t committing_c_txn_cnt;
-	struct list_head txn_list;
-	struct list_head ordered_c_txn_list;
-	struct list_head orderless_c_txn_list;
-	struct list_head committed_c_txn_list;
-	bool state;
-	bool contention;
-	spinlock_t txn_hdlr_spin;
-	spinlock_t txn_spin;
-	spinlock_t ordered_c_txn_spin;
-	spinlock_t orderless_c_txn_spin;
-	spinlock_t committed_c_txn_spin;
-	DB_IO *db_io;
-};
 
 static inline void txn_hdlr_alloc(struct __lightfs_txn_hdlr **__txn_hdlr)
 {
@@ -152,7 +93,7 @@ static inline void txn_buf_setup(DB_TXN_BUF *txn_buf, const void *data, uint32_t
 
 static inline void txn_buf_setup_cpy(DB_TXN_BUF *txn_buf, const void *data, uint32_t off, uint32_t size, enum lightfs_req_type type)
 {
-	char data_buf = (char *)data;
+	char *data_buf = (char *)data;
 	txn_buf->off = off;
 	txn_buf->len = size;
 	memcpy(txn_buf->buf+off, data_buf, size);
@@ -162,22 +103,25 @@ static inline void alloc_txn_buf_key_from_dbt(DB_TXN_BUF *txn_buf, DBT *dbt)
 {
 	txn_buf->key = kmalloc(dbt->size, GFP_KERNEL);
 	memcpy(txn_buf->key, dbt->data, dbt->size);
-	txn_buf->key_len = dbt_size;
+	txn_buf->key_len = dbt->size;
 }
 
 
 static inline uint32_t copy_dbt_from_dbc(DBC *dbc, DBT *dbt)
 {
-	dbt->size = *((uint32_t *)(dbc->buf + dbc->idx);
+	dbt->size = *((uint32_t *)(dbc->buf + dbc->idx));
 	memcpy(dbt->data, dbc->buf + dbc->idx + sizeof(uint32_t), dbt->size);
 	
 	return sizeof(uint32_t) + dbt->size;
 }
 
-int lightfs_bstore_txn_begin(DB_TXN *, DB_TXN **, uint32_t);
-int lightfs_bstore_txn_commit(DB_TXN *, uint32_t);
-int lightfs_bstore_txn_abort(DB_TXN *);
+//int lightfs_bstore_txn_begin(DB_TXN *, DB_TXN **, uint32_t);
+//int lightfs_bstore_txn_commit(DB_TXN *, uint32_t);
+//int lightfs_bstore_txn_abort(DB_TXN *);
 int lightfs_txn_hdlr_init(void);
 int lightfs_txn_hdlr_destroy(void);
+int lightfs_bstore_txn_insert(DB *, DB_TXN *, DBT *, DBT *, uint32_t, enum lightfs_req_type);
+int lightfs_bstore_txn_get(DB *, DB_TXN *, DBT *, DBT *, uint32_t, enum lightfs_req_type);
+int lightfs_bstore_dbc_cursor(DB *, DB_TXN *, DBC **, enum lightfs_req_type);
 
 #endif

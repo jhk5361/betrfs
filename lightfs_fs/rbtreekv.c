@@ -31,7 +31,7 @@ struct __toku_db_env_internal {
 struct __toku_dbc_wrap {
 	struct rb_kv_node *node;
 	DBT *left, *right;
-	struct __toku_dbc dbc;
+	DBC  dbc;
 };
 
 static int dbt_alloc_and_copy(DBT **to, const DBT *from)
@@ -72,7 +72,7 @@ static void db_env_set_update(DB_ENV *env, int (*update_function)(DB *, const DB
 	return;
 }
 
-static int db_env_set_default_bt_compare(DB_ENV *env, int (*bt_compare)(DB *, const DBT *, const DBT *))
+int db_env_set_default_bt_compare(DB_ENV *env, int (*bt_compare)(DB *, const DBT *, const DBT *))
 {
 	env->i->bt_compare = bt_compare;
 
@@ -84,8 +84,9 @@ static int db_env_open(DB_ENV *env, const char *db_home, uint32_t flags, int mod
 	return 0;
 }
 
-static int db_env_close(DB_ENV *env, uint32_t flag)
+int db_env_close(DB_ENV *env, uint32_t flag)
 {
+	kfree(env->i);
 	return 0;
 }
 
@@ -150,7 +151,7 @@ static struct rb_kv_node *find_val_with_key_ge(DB *db, const DBT *key)
 	return NULL;
 }
 
-static int db_get(DB *db, DB_TXN *txnid, DBT *key, DBT *data, uint32_t flags)
+int db_get(DB *db, DB_TXN *txnid, DBT *key, DBT *data, uint32_t flags)
 {
 	struct rb_kv_node *node = find_val_with_key(db, key);
 	if (node == NULL) {
@@ -161,7 +162,7 @@ static int db_get(DB *db, DB_TXN *txnid, DBT *key, DBT *data, uint32_t flags)
 	return 0;
 }
 
-static int db_del(DB *db, DB_TXN *txnid, DBT *key, uint32_t flags)
+int db_del(DB *db, DB_TXN *txnid, DBT *key, uint32_t flags)
 {
 	struct rb_kv_node *node = find_val_with_key(db, key);
 	if (node == NULL) {
@@ -235,7 +236,7 @@ static void db_set_val(const DBT *new_val, void *set_extra)
 	}
 }
 
-static int db_update(DB *db, DB_TXN *txnid, const DBT *key, const DBT *value, loff_t offset, uint32_t flags)
+int db_update(DB *db, DB_TXN *txnid, const DBT *key, const DBT *value, loff_t offset, uint32_t flags)
 {
 	char *buf;
 	struct rb_kv_node *node = find_val_with_key(db, key);
@@ -269,16 +270,14 @@ static void free_rb_tree(struct rb_node *node)
 	kfree(kv_node);
 }
 
-static int db_close(DB *db, uint32_t flag)
+int db_close(DB *db, uint32_t flag)
 {
 	free_rb_tree(db->i->kv.rb_node);
 	kfree(db->i);
-	kfree(db);
-
 	return 0;
 }
 
-static int db_put(DB *db, DB_TXN *txnid, DBT *key, DBT *data, uint32_t flags)
+int db_put(DB *db, DB_TXN *txnid, DBT *key, DBT *data, uint32_t flags)
 {
 	/* flags are not used in ftfs */
 	struct rb_kv_node *node;
@@ -395,10 +394,10 @@ static int dbc_c_get(DBC *c, DBT *key, DBT *value, uint32_t flags)
 		wrap = container_of(c, struct __toku_dbc_wrap, dbc);
 		wrap->node = node;
 
-		memcpy(key->data, &node->key->data, node->key->size);
-		key->size = node->key->size;
-		memcpy(value->data, &node->value->data, node->value->size);
-		value->size = node->value->size;
+		memcpy(key->data, &node->key.data, node->key.size);
+		key->size = node->key.size;
+		memcpy(value->data, &node->val.data, node->val.size);
+		value->size = node->val.size;
 	} else {
 		struct rb_node *node= &(wrap->node->node);
 		wrap = container_of(c, struct __toku_dbc_wrap, dbc);
@@ -416,16 +415,16 @@ static int dbc_c_get(DBC *c, DBT *key, DBT *value, uint32_t flags)
 			}
 		}
 		wrap->node = container_of(node, struct rb_kv_node, node);
-		memcpy(key->data, &wrap->node->key->data, wrap->node->key->size);
-		key->size = wrap->node->key->size;
-		memcpy(value->data, &wrap->node->value->data, wrap->node->value->size);
-		value->size = wrap->node->value->size;
+		memcpy(key->data, &wrap->node->key.data, wrap->node->key.size);
+		key->size = wrap->node->key.size;
+		memcpy(value->data, &wrap->node->val.data, wrap->node->val.size);
+		value->size = wrap->node->val.size;
 	}
 	
 	return 0;
 }
 
-static int db_cursor(DB *db, DB_TXN *txnid, DBC **cursorp, uint32_t flags)
+int db_cursor(DB *db, DB_TXN *txnid, DBC **cursorp, uint32_t flags)
 {
 	struct __toku_dbc_wrap *wrap = kmalloc(sizeof(struct __toku_dbc_wrap), GFP_KERNEL);
 	if (wrap == NULL) {

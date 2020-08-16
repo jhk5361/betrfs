@@ -396,6 +396,8 @@ static inline void ftio_unlock_pages(struct ftio *ftio)
 		lightfs_bstore_txn_commit(txn, flags)
 #define ftfs_bstore_txn_abort(txn)			\
 		lightfs_bstore_txn_abort(txn)
+#define ftfs_bstore_flush_log(env)	env->log_flush(env, 0)
+#define ftfs_bstore_checkpoint(env)	env->txn_checkpoint(env, 0, 0, 0)
 #else
 #define ftfs_bstore_txn_begin(env, parent, txn, flags)	\
 		env->txn_begin(env, parent, txn, flags)
@@ -403,10 +405,10 @@ static inline void ftio_unlock_pages(struct ftio *ftio)
 		txn->commit(txn, flags)
 #define ftfs_bstore_txn_abort(txn)			\
 		txn->abort(txn)
-#endif
-
 #define ftfs_bstore_flush_log(env)	env->log_flush(env, 0)
 #define ftfs_bstore_checkpoint(env)	env->txn_checkpoint(env, 0, 0, 0)
+#endif
+
 
 int ftfs_bstore_get_ino(DB *meta_db, DB_TXN *txn, ino_t *ino);
 int ftfs_bstore_update_ino(DB *meta_db, DB_TXN *txn, ino_t ino);

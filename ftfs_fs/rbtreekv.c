@@ -72,9 +72,9 @@ static void db_env_set_update(DB_ENV *env, int (*update_function)(DB *, const DB
 	return;
 }
 
-static int db_env_set_default_bt_compare(DB_ENV *env, int (*bt_compare)(DB *, const DBT *, const DBT *))
+static int db_env_set_key_ops(DB_ENV *env, struct toku_db_key_operations *key_ops)
 {
-	env->i->bt_compare = bt_compare;
+	env->i->bt_compare = key_ops->keycmp;
 
 	return 0;
 }
@@ -416,7 +416,7 @@ int db_env_create(DB_ENV **envp, uint32_t flags)
 	/* redirect some operations in use */
 	(*envp)->set_cachesize = db_env_set_cachesize;
 	(*envp)->set_update = db_env_set_update;
-	//(*envp)->set_default_bt_compare = db_env_set_default_bt_compare;
+	(*envp)->set_key_ops = db_env_set_key_ops;
 	(*envp)->open = db_env_open;
 	(*envp)->close = db_env_close;
 

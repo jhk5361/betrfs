@@ -6,6 +6,10 @@
 #include "tokudb.h"
 #include "ftfs_fs.h"
 
+#ifdef RB_LOCK
+static struct mutex rb_lock;
+#endif
+
 /*
  * Create one db as a rbtree. One db_env has a list of rbtrees, each
  * has its own rbtree struct;
@@ -153,22 +157,43 @@ static struct rb_kv_node *find_val_with_key_ge(DB *db, const DBT *key)
 
 int db_get(DB *db, DB_TXN *txnid, DBT *key, DBT *data, uint32_t flags)
 {
-	struct rb_kv_node *node = find_val_with_key(db, key);
+	struct rb_kv_node *node;
+#ifdef RB_LOCK
+	mutex_lock(&rb_lock);
+#endif
+	node = find_val_with_key(db, key);
 	if (node == NULL) {
+#ifdef RB_LOCK
+		mutex_unlock(&rb_lock);
+#endif
 		return DB_NOTFOUND;
 	}
 	memcpy(data->data, node->val.data, data->size);
+#ifdef RB_LOCK
+		mutex_unlock(&rb_lock);
+#endif
+
 
 	return 0;
 }
 
 int db_del(DB *db, DB_TXN *txnid, DBT *key, uint32_t flags)
 {
-	struct rb_kv_node *node = find_val_with_key(db, key);
+	struct rb_kv_node *node;
+#ifdef RB_LOCK
+	mutex_lock(&rb_lock);
+#endif
+	node = find_val_with_key(db, key);
 	if (node == NULL) {
+#ifdef RB_LOCK
+		mutex_unlock(&rb_lock);
+#endif
 		return DB_NOTFOUND;
 	}
 	rb_erase(&node->node, &db->i->kv);
+#ifdef RB_LOCK
+		mutex_unlock(&rb_lock);
+#endif
 	kfree(node->key.data);
 	kfree(node->val.data);
 	kfree(node);
@@ -239,7 +264,11 @@ static void db_set_val(const DBT *new_val, void *set_extra)
 int db_update(DB *db, DB_TXN *txnid, const DBT *key, const DBT *value, loff_t offset, uint32_t flags)
 {
 	char *buf;
-	struct rb_kv_node *node = find_val_with_key(db, key);
+	struct rb_kv_node *node;
+#ifdef RB_LOCK
+	mutex_lock(&rb_lock);
+#endif
+	node = find_val_with_key(db, key);
 	struct set_val_info info;
 	int ret;
 	DBT *val = (node == NULL) ? NULL : &node->val;
@@ -249,6 +278,9 @@ int db_update(DB *db, DB_TXN *txnid, const DBT *key, const DBT *value, loff_t of
 	if (val->size > value->size) {
 		val->size = value->size;
 	}
+#ifdef RB_LOCK
+	mutex_unlock(&rb_lock);
+#endif
 
 
 	//ret = db->dbenv->i->update_cb(db, key, val, extra, db_set_val, &info);
@@ -283,6 +315,9 @@ int db_put(DB *db, DB_TXN *txnid, DBT *key, DBT *data, uint32_t flags)
 	struct rb_kv_node *node;
 	int ret;
 
+#ifdef RB_LOCK
+	mutex_lock(&rb_lock);
+#endif
 	node = find_val_with_key(db, key);
 	if (node != NULL) {
 		kfree(node->val.data);
@@ -299,7 +334,9 @@ int db_put(DB *db, DB_TXN *txnid, DBT *key, DBT *data, uint32_t flags)
 	BUG_ON(ret != 0);
 	ret = rb_kv_insert(db, node);
 	BUG_ON(ret != 0);
-
+#ifdef RB_LOCK
+	mutex_unlock(&rb_lock);
+#endif
 	return ret;
 }
 
@@ -307,14 +344,23 @@ static int dbc_c_getf_set_range(DBC *c, uint32_t flag, DBT *key, YDB_CALLBACK_FU
 {
 	/* all things in ftfs use flag = 0, ignore it */
 	struct __toku_dbc_wrap *wrap;
-	struct rb_kv_node *node = find_val_with_key_ge(c->dbp, key);
+	struct rb_kv_node *node;
+	node = find_val_with_key_ge(c->dbp, key);
+#ifdef RB_LOCK
+	mutex_lock(&rb_lock);
+#endif
 	if (node == NULL) {
+#ifdef RB_LOCK
+		mutex_unlock(&rb_lock);
+#endif
 		return DB_NOTFOUND;
 	}
 	wrap = container_of(c, struct __toku_dbc_wrap, dbc);
 	wrap->node = node;
 	f(&node->key, &node->val, extra);
-
+#ifdef RB_LOCK
+	mutex_unlock(&rb_lock);
+#endif
 	return 0;
 }
 
@@ -322,10 +368,16 @@ static int dbc_c_getf_next(DBC *c, uint32_t flag, YDB_CALLBACK_FUNCTION f, void 
 {
 	/* again, flag is ignored */
 	struct __toku_dbc_wrap *wrap = container_of(c, struct __toku_dbc_wrap, dbc);
-	struct rb_node *node= &(wrap->node->node);
+	struct rb_node *node = &(wrap->node->node);
+#ifdef RB_LOCK
+	mutex_lock(&rb_lock);
+#endif
 	node = rb_next(node); /* logical next */
 	if (node == NULL) {
 		wrap->node = NULL;
+#ifdef RB_LOCK
+		mutex_unlock(&rb_lock);
+#endif
 		return DB_NOTFOUND;
 	}
 	/* since we only consider right bound in ftfs, simply do this */
@@ -338,6 +390,9 @@ static int dbc_c_getf_next(DBC *c, uint32_t flag, YDB_CALLBACK_FUNCTION f, void 
 	}
 	wrap->node = container_of(node, struct rb_kv_node, node);
 	f(&wrap->node->key, &wrap->node->val, extra);
+#ifdef RB_LOCK
+		mutex_unlock(&rb_lock);
+#endif
 
 	return 0;
 }
@@ -386,9 +441,15 @@ static int dbc_c_getf_current(DBC *c, uint32_t flag, YDB_CALLBACK_FUNCTION f, vo
 static int dbc_c_get(DBC *c, DBT *key, DBT *value, uint32_t flags)
 {
 	struct __toku_dbc_wrap *wrap;
+#ifdef RB_LOCK
+	mutex_lock(&rb_lock);
+#endif
 	if (flags == DB_SET_RANGE) {
 		struct rb_kv_node *node = find_val_with_key_ge(c->dbp, key);
 		if (node == NULL) {
+#ifdef RB_LOCK
+			mutex_unlock(&rb_lock);
+#endif
 			return DB_NOTFOUND;
 		}
 		wrap = container_of(c, struct __toku_dbc_wrap, dbc);
@@ -404,6 +465,9 @@ static int dbc_c_get(DBC *c, DBT *key, DBT *value, uint32_t flags)
 		node = rb_next(node); /* logical next */
 		if (node == NULL) {
 			wrap->node = NULL;
+#ifdef RB_LOCK
+			mutex_unlock(&rb_lock);
+#endif
 			return DB_NOTFOUND;
 		}
 	/* since we only consider right bound in ftfs, simply do this */
@@ -411,6 +475,9 @@ static int dbc_c_get(DBC *c, DBT *key, DBT *value, uint32_t flags)
 			struct rb_kv_node *kv_node = container_of(node, struct rb_kv_node, node);
 			if (c->dbp->dbenv->i->bt_compare(c->dbp, &kv_node->key, wrap->right) > 0) {
 				wrap->node = NULL;
+#ifdef RB_LOCK
+				mutex_unlock(&rb_lock);
+#endif
 				return DB_NOTFOUND;
 			}
 		}
@@ -420,6 +487,9 @@ static int dbc_c_get(DBC *c, DBT *key, DBT *value, uint32_t flags)
 		memcpy(value->data, &wrap->node->val.data, wrap->node->val.size);
 		value->size = wrap->node->val.size;
 	}
+#ifdef RB_LOCK
+	mutex_unlock(&rb_lock);
+#endif
 	
 	return 0;
 }
@@ -455,6 +525,9 @@ int db_env_create(DB_ENV **envp, uint32_t flags)
 		return -ENOMEM;
 	}
 	INIT_LIST_HEAD(&((*envp)->i->rbtree_list));
+#ifdef RB_LOCK
+	mutex_init(&rb_lock);
+#endif
 
 	return 0;
 }

@@ -261,101 +261,6 @@ static int env_keycmp(DB *DB, DBT const *a, DBT const *b)
 	return memcmp(a->data, b->data, alen);
 }
 
-#ifdef FTFS_PFSPLIT
-static int
-env_keypfsplit(DB *db, DBT const *a, DBT const *b,
-               void (*set_key)(const DBT *new_key, void *set_extra),
-               void *set_extra)
-{
-	char *sa, *sb;
-	size_t i, size;
-	int is_data;
-	DBT pivot;
-	char *buf;
-
-	if (strcmp(db->cmp_descriptor->dbt.data, data_desc_buf) == 0) {
-		is_data = 1;
-	} else {
-		BUG_ON(strcmp(db->cmp_descriptor->dbt.data, meta_desc_buf) != 0);
-		is_data = 0;
-	}
-
-	sa = a->data;
-	sb = b->data;
-	i = 0;
-	size = (a->size > b->size) ? b->size : a->size;
-	if (is_data) {
-		if (size <= 8)
-			goto end_counting;
-		size -= 8;
-	}
-	for (; i < size; i++) {
-		if (sa[i] != sb[i])
-			break;
-	}
-
-end_counting:
-	if (set_key == NULL)
-		return i;
-
-	size = a->size;
-	if (is_data) {
-		if (size <= 8)
-			goto use_a;
-		size -= 8;
-	}
-	if (i >= size)
-		goto use_a;
-	if (b->size == 0) {
-		goto check_data_key;
-	}
-	if (sa[i] == '\x01') {
-		if (i > 0 && sa[i - 1] == '\x01') {
-			i += 1;
-		}
-	}
-	for (; i < size; i++) {
-		if (sa[i] == '\x01') {
-			break;
-		}
-	}
-	if (i >= size)
-		goto check_data_key;
-	BUG_ON(i + 1 >= size);
-	if (sa[i + 1] == '\xff')
-		goto check_data_key;
-	size = i + 3;
-	if (is_data)
-		size += 8;
-	buf = kmalloc(size, GFP_KERNEL);
-	if (buf == NULL)
-		goto check_data_key;
-	memcpy(buf, sa, i + 1);
-	buf[i + 1] = '\xff';
-	buf[i + 2] = '\x00';
-	if (is_data)
-		ftfs_data_key_set_blocknum(buf, size, 0);
-use_our_key:
-	dbt_setup(&pivot, buf, size);
-	set_key(&pivot, set_extra);
-	kfree(buf);
-	return 0;
-check_data_key:
-	if (is_data) {
-		size = a->size;
-		buf = kmalloc(size, GFP_KERNEL);
-		if (buf != NULL) {
-			memcpy(buf, sa, size);
-			ftfs_data_key_set_blocknum(buf, size, FTFS_UINT64_MAX);
-			goto use_our_key;
-		}
-	}
-use_a:
-	set_key(a, set_extra);
-	return 0;
-}
-#endif /* FTFS_PFSPLIT */
-
 static int
 env_keyrename(const DBT *old_prefix, const DBT *new_prefix, const DBT *old_dbt,
               void (*set_key)(const DBT *new_key, void *set_extra),
@@ -453,122 +358,14 @@ static void env_keyprint(const DBT *key, bool is_trace_printable)
 #endif
 }
 
-#ifdef FTFS_LIFTING
-static int
-env_keylift(const DBT *lpivot, const DBT *rpivot,
-            void (*set_lift)(const DBT *lift, void *set_extra), void *set_extra)
-{
-	uint32_t cmp_len, lift_len;
-	const uint64_t *lp64, *rp64;
-	const uint8_t *lp8, *rp8;
-	char *lift_key;
-	DBT lift_dbt;
-
-	cmp_len = (lpivot->size < rpivot->size) ? lpivot->size : rpivot->size;
-	lp64 = (uint64_t *)lpivot->data;
-	rp64 = (uint64_t *)rpivot->data;
-	while (cmp_len >= 8 && *lp64 == *rp64) {
-		cmp_len -= 8;
-		lp64 += 1;
-		rp64 += 1;
-	}
-	lp8 = (uint8_t *)lp64;
-	rp8 = (uint8_t *)rp64;
-	while (cmp_len > 0 && *lp8 == *rp8) {
-		cmp_len -= 1;
-		lp8 += 1;
-		rp8 += 1;
-	}
-
-	lift_len = lp8 - (uint8_t *)lpivot->data;
-	if (lift_len == 0) {
-		lift_key = NULL;
-	} else {
-		lift_key = kmalloc(lift_len, GFP_KERNEL);
-		if (lift_key == NULL)
-			return -ENOMEM;
-		memcpy(lift_key, lpivot->data, lift_len);
-	}
-	dbt_setup(&lift_dbt, lift_key, lift_len);
-	set_lift(&lift_dbt, set_extra);
-	if (lift_len != 0)
-		kfree(lift_key);
-
-	return 0;
-}
-
-static int
-env_keyliftkey(const DBT *key, const DBT *lifted,
-               void (*set_key)(const DBT *new_key, void *set_extra),
-               void *set_extra)
-{
-	uint32_t new_key_len;
-	char *new_key;
-	DBT new_key_dbt;
-
-        // lifted not matching prefix, we cant lift
-        if (lifted->size >= key->size ||
-                memcmp(key->data, lifted->data, lifted->size) != 0)
-            return -EINVAL;
-	new_key_len = key->size - lifted->size;
-        new_key = kmalloc(new_key_len, GFP_KERNEL);
-        if (new_key == NULL)
-                return -ENOMEM;
-        memcpy(new_key, key->data + lifted->size, new_key_len);
-	dbt_setup(&new_key_dbt, new_key, new_key_len);
-	set_key(&new_key_dbt, set_extra);
-	if (new_key_len != 0)
-		kfree(new_key);
-
-	return 0;
-}
-
-static int
-env_keyunliftkey(const DBT *key, const DBT *lifted,
-                 void (*set_key)(const DBT *new_key, void *set_extra),
-                 void *set_extra)
-{
-	uint32_t new_key_len;
-	char *new_key;
-	DBT new_key_dbt;
-
-	new_key_len = key->size + lifted->size;
-	if (new_key_len == 0) {
-		new_key = NULL;
-	} else {
-		new_key = kmalloc(new_key_len, GFP_KERNEL);
-		if (new_key == NULL)
-			return -ENOMEM;
-		memcpy(new_key, lifted->data, lifted->size);
-		memcpy(new_key + lifted->size, key->data, key->size);
-	}
-	dbt_setup(&new_key_dbt, new_key, new_key_len);
-	set_key(&new_key_dbt, set_extra);
-	if (new_key_len != 0)
-		kfree(new_key);
-
-	return 0;
-}
-#endif /* FTFS_LIFTING */
-
 static struct toku_db_key_operations ftfs_key_ops = {
 	.keycmp       = env_keycmp,
-#ifdef FTFS_PFSPLIT
-	.keypfsplit   = env_keypfsplit,
-#else
 	.keypfsplit   = NULL,
-#endif
 	.keyrename    = env_keyrename,
 	.keyprint     = env_keyprint,
-#ifdef FTFS_LIFTING
-	.keylift      = env_keylift,
-	.keyliftkey   = env_keyliftkey,
-	.keyunliftkey = env_keyunliftkey,
-#else
 	.keylift      = NULL,
 	.keyliftkey   = NULL,
 	.keyunliftkey = NULL,
-#endif
 };
 
 /*
@@ -1314,85 +1111,6 @@ out:
 	return ret;
 }
 
-#ifdef FTFS_RANGE_RENAME /* RANGE RENAME */
-int
-ftfs_bstore_move_rr(DB *meta_db, DB *data_db, DBT *old_meta_dbt,
-                    DBT *new_meta_dbt, DB_TXN *txn,
-                    enum ftfs_bstore_move_type type)
-{
-	int ret;
-	void *min_key_buf, *max_key_buf;
-	DBT min_key_dbt, max_key_dbt, old_prefix_dbt, new_prefix_dbt;
-
-	ret = -ENOMEM;
-	min_key_buf = max_key_buf = NULL;
-	dbt_init(&old_prefix_dbt);
-	dbt_init(&new_prefix_dbt);
-	if ((min_key_buf = kmalloc(KEY_MAX_LEN, GFP_KERNEL)) == NULL)
-		goto out;
-	if ((max_key_buf = kmalloc(KEY_MAX_LEN, GFP_KERNEL)) == NULL)
-		goto free_out;
-
-	dbt_setup_buf(&min_key_dbt, min_key_buf, KEY_MAX_LEN);
-	dbt_setup_buf(&max_key_dbt, max_key_buf, KEY_MAX_LEN);
-	if (type == FTFS_BSTORE_MOVE_DIR) {
-		ret = alloc_meta_dbt_prefix(&old_prefix_dbt, old_meta_dbt);
-		if (ret)
-			goto free_out;
-		ret = alloc_meta_dbt_prefix(&new_prefix_dbt, new_meta_dbt);
-		if (ret)
-			goto free_out;
-		// posterity is bond by (src\x01\x01, src\x1\xff)
-		copy_child_meta_dbt_from_meta_dbt(&min_key_dbt,
-			old_meta_dbt, "");
-		copy_subtree_max_meta_dbt_from_meta_dbt(&max_key_dbt,
-			old_meta_dbt);
-		ret = meta_db->rename(meta_db, txn, &min_key_dbt, &max_key_dbt,
-		                      &old_prefix_dbt, &new_prefix_dbt,
-		                      DB_RENAME_FLAGS);
-
-		if (ret)
-			goto free_out;
-
-		// we can ignore blocknum here
-		copy_child_data_dbt_from_meta_dbt(&min_key_dbt, old_meta_dbt,
-		                                  "", 0);
-		copy_subtree_max_data_dbt_from_meta_dbt(&max_key_dbt,
-		                                        old_meta_dbt);
-		ret = data_db->rename(data_db, txn, &min_key_dbt, &max_key_dbt,
-		                      &old_prefix_dbt, &new_prefix_dbt,
-		                      DB_RENAME_FLAGS);
-	} else {
-		copy_data_dbt_from_meta_dbt(&min_key_dbt, old_meta_dbt, 0);
-		copy_data_dbt_from_meta_dbt(&max_key_dbt, old_meta_dbt,
-			FTFS_UINT64_MAX);
-		ret = data_db->rename(data_db, txn, &min_key_dbt, &max_key_dbt,
-		                      old_meta_dbt, new_meta_dbt,
-		                      DB_RENAME_FLAGS);
-	}
-
-free_out:
-	dbt_destroy(&new_prefix_dbt);
-	dbt_destroy(&old_prefix_dbt);
-	if (max_key_buf)
-		kfree(max_key_buf);
-	if (min_key_buf)
-		kfree(min_key_buf);
-out:
-	return ret;
-}
-
-int
-ftfs_bstore_move(DB *meta_db, DB *data_db, DBT *old_meta_dbt, DBT *new_meta_dbt,
-                 DB_TXN *txn, enum ftfs_bstore_move_type type)
-{
-	if (type == FTFS_BSTORE_MOVE_SMALL_FILE)
-		return ftfs_bstore_move_copy(meta_db, data_db, old_meta_dbt,
-					     new_meta_dbt, txn, type);
-	return ftfs_bstore_move_rr(meta_db, data_db, old_meta_dbt,
-	                           new_meta_dbt, txn, type);
-}
-#else /* FTFS_RANGE_RENAME */
 int
 ftfs_bstore_move(DB *meta_db, DB *data_db, DBT *old_meta_dbt, DBT *new_meta_dbt,
                  DB_TXN *txn, enum ftfs_bstore_move_type type)
@@ -1400,7 +1118,6 @@ ftfs_bstore_move(DB *meta_db, DB *data_db, DBT *old_meta_dbt, DBT *new_meta_dbt,
 	return ftfs_bstore_move_copy(meta_db, data_db, old_meta_dbt,
 	                             new_meta_dbt, txn, type);
 }
-#endif /* FTFS_RANGE_RENAME */
 
 /*
  * XXX: delete following functions

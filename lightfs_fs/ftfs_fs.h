@@ -184,8 +184,9 @@ ftfs_data_key_set_blocknum(char *key, uint32_t key_size, uint64_t blocknum)
 static inline int
 key_is_same_of_key(char *key1, char *key2)
 {
-	return *(uint64_t *)(key1 + INO_POS) == *(uint64_t *)(key2 + INO_POS) &&
-	       !strcmp(ftfs_key_path(key1), ftfs_key_path(key2));
+	//return *(uint64_t *)(key1 + INO_POS) == *(uint64_t *)(key2 + INO_POS) &&
+	//       !strcmp(ftfs_key_path(key1), ftfs_key_path(key2));
+	return 1;
 }
 
 static inline int
@@ -427,10 +428,10 @@ int ftfs_bstore_meta_get(DB *meta_db, DBT *meta_dbt, DB_TXN *txn,
 int ftfs_bstore_meta_put(DB *meta_db, DBT *meta_dbt, DB_TXN *txn,
                          struct ftfs_metadata *metadata);
 int ftfs_bstore_meta_del(DB *meta_db, DBT *meta_dbt, DB_TXN *txn);
-int ftfs_bstore_meta_readdir(DB *meta_db, DBT *meta_dbt, DB_TXN *txn,
-                             struct dir_context *ctx);
 
 #ifdef LIGHTFS
+int ftfs_bstore_meta_readdir(DB *meta_db, DBT *meta_dbt, DB_TXN *txn,
+                             struct dir_context *ctx, struct inode *inode);
 int ftfs_bstore_get(DB *data_db, DBT *data_dbt, DB_TXN *txn, void *buf); //TODO
 int ftfs_bstore_put(DB *data_db, DBT *data_dbt, DB_TXN *txn,
                     const void *buf, size_t len, int is_seq); //TODO
@@ -438,6 +439,8 @@ int ftfs_bstore_update(DB *data_db, DBT *data_dbt, DB_TXN *txn,
                        const void *buf, size_t size, loff_t offset); // TODO
 
 #else
+int ftfs_bstore_meta_readdir(DB *meta_db, DBT *meta_dbt, DB_TXN *txn,
+                             struct dir_context *ctx);
 int ftfs_bstore_get(DB *data_db, DBT *data_dbt, DB_TXN *txn, void *buf); //TODO
 int ftfs_bstore_put(DB *data_db, DBT *data_dbt, DB_TXN *txn,
                     const void *buf, size_t len, int is_seq); //TODO
@@ -446,12 +449,22 @@ int ftfs_bstore_update(DB *data_db, DBT *data_dbt, DB_TXN *txn,
 #endif
 // truncate a file in data_db (we dont do extend-like falloc in our truncate),
 // preserve offset bytes in block new_num, (offset == 0) means delete that block
+#ifdef LIGHTFS
+int ftfs_bstore_trunc(DB *data_db, DBT *meta_dbt, DB_TXN *txn,
+                      uint64_t new_num, uint64_t offset, struct inode *inode);
+int ftfs_bstore_scan_one_page(DB *data_db, DBT *meta_dbt, DB_TXN *txn,
+                              struct page *page, struct inode *inode);
+int ftfs_bstore_scan_pages(DB *data_db, DBT *meta_dbt, DB_TXN *txn,
+                           struct ftio *ftio, struct inode *inode);
+#else
 int ftfs_bstore_trunc(DB *data_db, DBT *meta_dbt, DB_TXN *txn,
                       uint64_t new_num, uint64_t offset);
 int ftfs_bstore_scan_one_page(DB *data_db, DBT *meta_dbt, DB_TXN *txn,
                               struct page *page);
 int ftfs_bstore_scan_pages(DB *data_db, DBT *meta_dbt, DB_TXN *txn,
                            struct ftio *ftio);
+#endif
+
 
 int ftfs_dir_is_empty(DB *meta_db, DBT *meta_dbt, DB_TXN *txn, int *ret);
 

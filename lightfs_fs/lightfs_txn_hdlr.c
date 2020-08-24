@@ -161,6 +161,7 @@ int lightfs_bstore_txn_get(DB *db, DB_TXN *txn, DBT *key, DBT *value, uint32_t o
 	//lightfs_io_read(txn_buf);
 	wait_for_completion(txn_buf->completionp);
 	lightfs_completion_free(txn_buf->completionp);
+	txn_buf->buf = NULL;
 	lightfs_txn_buf_free(txn_buf);
 
 #ifndef EMULATION
@@ -170,6 +171,40 @@ int lightfs_bstore_txn_get(DB *db, DB_TXN *txn, DBT *key, DBT *value, uint32_t o
 #endif
 
 	return ret;
+}
+
+void *lightfs_bstore_txn_sync_put_cb(void *completionp)
+{
+	complete((struct completion *)completionp);
+	return NULL;
+}
+
+
+int lightfs_bstore_txn_sync_put(DB *db, DB_TXN *txn, DBT *key, DBT *value, uint32_t off, enum lightfs_req_type type) {
+	DB_TXN_BUF *txn_buf;
+
+	txn_buf = kmem_cache_alloc(lightfs_txn_buf_cachep, GFP_KERNEL);
+	txn_buf->txn_id = txn->txn_id;
+	txn_buf->db = db;
+	txn_buf->completionp = kmem_cache_alloc(lightfs_completion_cachep, GFP_KERNEL);
+	txn_buf->buf = (char*)kmem_cache_alloc(lightfs_buf_cachep, GFP_KERNEL);
+	txn_buf_setup_cpy(txn_buf, value->data, off, value->size, type);
+	alloc_txn_buf_key_from_dbt(txn_buf, key);
+
+	txn_buf->txn_buf_cb = lightfs_bstore_txn_sync_put_cb;
+	txn_hdlr->db_io->sync_put(db, txn_buf);
+	//lightfs_io_read(txn_buf);
+	wait_for_completion(txn_buf->completionp);
+	lightfs_completion_free(txn_buf->completionp);
+	lightfs_txn_buf_free(txn_buf);
+
+
+	txn->cnt++;
+	txn->size += calc_txn_buf_size(txn_buf);
+	//txn->state = TXN_INSERTING;
+
+	return 0;
+
 }
 
 void *lightfs_bstore_dbc_cb(void *completionp)
@@ -268,6 +303,7 @@ int lightfs_bstore_dbc_close(DBC *dbc)
 {
 	DB_TXN_BUF *txn_buf = (DB_TXN_BUF *)dbc->extra;
 	lightfs_completion_free(txn_buf->completionp);
+	txn_buf->buf = NULL;
 	lightfs_txn_buf_free(txn_buf);
 	lightfs_dbc_free(dbc);
 	return 0;
@@ -564,6 +600,18 @@ commit_repeat:
 		goto commit_repeat;
 
 txn_repeat:
+		//TODO:: fsync: 1st priority
+		c_txn_state = lightfs_txn_calc_order(txn, &merge_c_txn, &related_c_txn);
+		if (merge_c_txn) {
+			lightfs_c_txn_insert(merge_c_txn, txn);
+		} else {
+			lightfs_c_txn_create(&c_txn, c_txn_state);
+			lightfs_c_txn_insert(c_txn, txn);
+			lightfs_c_txn_make_relation(related_c_txn, c_txn);
+		}
+
+
+
 		spin_lock(&txn_hdlr->txn_spin);
 		if (waitqueue_active(&txn_hdlr->txn_wq) && txn_hdlr->txn_cnt <= TXN_THRESHOLD) {
 			wake_up_all(&txn_hdlr->txn_wq);
@@ -581,14 +629,20 @@ txn_repeat:
 		if (txn_hdlr->ordered_c_txn_cnt + txn_hdlr->orderless_c_txn_cnt >= C_TXN_COMMITTING_LIMIT) {
 			goto transfer;			
 		}
-		c_txn_state = lightfs_txn_calc_order(txn, &merge_c_txn, &related_c_txn);
-		if (merge_c_txn) {
-			lightfs_c_txn_insert(merge_c_txn, txn);
+
+		spin_lock(&txn_hdlr->running_c_txn_spin);
+		if ( txn_hdlr->running_c_txn && (diff_c_txn_and_txn(txn_hdlr->running_c_txn, txn) >= 0) ) { // can be merge
+			lightfs_c_txn_insert(txn_hdlr->running_c_txn, txn);
 		} else {
-			lightfs_c_txn_create(&c_txn, c_txn_state);
+			lightfs_c_txn_create(&c_txn, C_TXN_ORDERLESS);
 			lightfs_c_txn_insert(c_txn, txn);
-			lightfs_c_txn_make_relation(related_c_txn, c_txn);
+			txn_hdlr->running_c_txn_cnt++;
+			txn_hdlr->running_c_txn = c_txn;
+			if (txn_hdlr->running_c_txn_cnt >= RUNNING_C_TXN_LIMIT) {
+				c_txn->state = TXN_FLUSH;
+			}
 		}
+		spin_unlock(&txn_hdlr->running_c_txn_spin);
 		goto txn_repeat;
 
 transfer:

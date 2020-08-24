@@ -12,6 +12,11 @@ int lightfs_io_get (DB *db, DB_TXN_BUF *txn_buf)
 	return 0;
 }
 
+int lightfs_io_sync_put (DB *db, DB_TXN_BUF *txn_buf)
+{
+	return 0;
+}
+
 int lightfs_io_iter (DB *db, DBC *dbc, DB_TXN_BUF *txn_buf)
 {
 	return 0;
@@ -45,6 +50,16 @@ int rb_io_get (DB *db, DB_TXN_BUF *txn_buf)
 
 int rb_io_iter (DB *db, DBC *dbc, DB_TXN_BUF *txn_buf)
 {
+	return 0;
+}
+
+int rb_io_sync_put (DB *db, DB_TXN_BUF *txn_buf)
+{
+	DBT key, value;
+	dbt_setup(&key, txn_buf->key, txn_buf->key_len);
+	dbt_setup(&value, txn_buf->buf+txn_buf->off, txn_buf->len);
+	txn_buf->ret = db_put(txn_buf->db, NULL, &key, &value, 0);
+	txn_buf->txn_buf_cb(txn_buf->completionp);
 	return 0;
 }
 
@@ -97,6 +112,7 @@ int lightfs_io_create (DB_IO **db_io) {
 	(*db_io) = (DB_IO *)kmalloc(sizeof(DB_IO), GFP_KERNEL);
 #ifdef EMULATION
 	(*db_io)->get = rb_io_get;
+	(*db_io)->sync_put = rb_io_sync_put;
 	(*db_io)->iter = rb_io_iter;
 	(*db_io)->transfer = rb_io_transfer;
 	(*db_io)->commit = rb_io_commit;

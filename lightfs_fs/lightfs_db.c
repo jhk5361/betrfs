@@ -28,6 +28,12 @@ int lightfs_db_put (DB *db, DB_TXN *txn, DBT *key, DBT *value, enum lightfs_req_
 	return lightfs_bstore_txn_insert(db, txn, key, value, 0, type);
 }
 
+int lightfs_db_sync_put (DB *db, DB_TXN *txn, DBT *key, DBT *value, enum lightfs_req_type type)
+{
+	return lightfs_bstore_txn_sync_put(db, txn, key, value, 0, type);
+}
+
+
 int lightfs_db_seq_put(DB *db, DB_TXN *txn, DBT *key, DBT *value, enum lightfs_req_type type)
 {
 	return lightfs_bstore_txn_insert(db, txn, key, value, 0, type);
@@ -89,6 +95,7 @@ int lightfs_db_create(DB **db, DB_ENV *env, uint32_t flags)
 	(*db)->close = lightfs_db_close;
 	(*db)->get = lightfs_db_get;
 	(*db)->put = lightfs_db_put;
+	(*db)->sync_put = lightfs_db_sync_put;
 	(*db)->seq_put = lightfs_db_seq_put;
 	(*db)->update = lightfs_db_update;
 	(*db)->del = lightfs_db_del;

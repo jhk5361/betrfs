@@ -86,6 +86,8 @@ void exit_ftfs_fs(void);
 
 #define FTFS_DEFAULT_CIRCLE 128
 #define FTFS_INO_INC        1000
+#define FTFS_INO_MAX		1000000000000ULL
+#define FTFS_INO_CUR		1ULL
 
 struct ftfs_info {
 	ino_t next_ino;
@@ -427,6 +429,8 @@ int ftfs_bstore_meta_get(DB *meta_db, DBT *meta_dbt, DB_TXN *txn,
                          struct ftfs_metadata *metadata);
 int ftfs_bstore_meta_put(DB *meta_db, DBT *meta_dbt, DB_TXN *txn,
                          struct ftfs_metadata *metadata);
+int ftfs_bstore_meta_sync_put(DB *meta_db, DBT *meta_dbt, DB_TXN *txn,
+                         struct ftfs_metadata *metadata);
 int ftfs_bstore_meta_del(DB *meta_db, DBT *meta_dbt, DB_TXN *txn);
 
 #ifdef LIGHTFS
@@ -456,6 +460,7 @@ int ftfs_bstore_scan_one_page(DB *data_db, DBT *meta_dbt, DB_TXN *txn,
                               struct page *page, struct inode *inode);
 int ftfs_bstore_scan_pages(DB *data_db, DBT *meta_dbt, DB_TXN *txn,
                            struct ftio *ftio, struct inode *inode);
+int ftfs_dir_is_empty(DB *meta_db, DBT *meta_dbt, DB_TXN *txn, int *ret, struct inode *inode);
 #else
 int ftfs_bstore_trunc(DB *data_db, DBT *meta_dbt, DB_TXN *txn,
                       uint64_t new_num, uint64_t offset);
@@ -463,10 +468,10 @@ int ftfs_bstore_scan_one_page(DB *data_db, DBT *meta_dbt, DB_TXN *txn,
                               struct page *page);
 int ftfs_bstore_scan_pages(DB *data_db, DBT *meta_dbt, DB_TXN *txn,
                            struct ftio *ftio);
+int ftfs_dir_is_empty(DB *meta_db, DBT *meta_dbt, DB_TXN *txn, int *ret);
 #endif
 
 
-int ftfs_dir_is_empty(DB *meta_db, DBT *meta_dbt, DB_TXN *txn, int *ret);
 
 enum ftfs_bstore_move_type {
 	FTFS_BSTORE_MOVE_DIR,

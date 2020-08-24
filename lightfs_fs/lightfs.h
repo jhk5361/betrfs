@@ -45,6 +45,7 @@ struct __lightfs_c_txn_list {
 
 struct __lightfs_db_io {
 	int (*get) (DB *db, DB_TXN_BUF *txn_buf);
+	int (*sync_put) (DB *db, DB_TXN_BUF *txn_buf);
 	int (*iter) (DB *db, DBC *dbc, DB_TXN_BUF *txn_buf);
 	int (*transfer) (DB *db, DB_C_TXN *c_txn);
 	int (*commit) (DB_C_TXN *c_txn);
@@ -60,6 +61,7 @@ struct __lightfs_txn_hdlr {
 	uint32_t ordered_c_txn_cnt;
 	uint32_t orderless_c_txn_cnt;
 	uint32_t committing_c_txn_cnt;
+	uint32_t running_c_txn_cnt;
 	struct list_head txn_list;
 	struct list_head ordered_c_txn_list;
 	struct list_head orderless_c_txn_list;
@@ -71,7 +73,10 @@ struct __lightfs_txn_hdlr {
 	spinlock_t ordered_c_txn_spin;
 	spinlock_t orderless_c_txn_spin;
 	spinlock_t committed_c_txn_spin;
+	spinlock_t running_c_txn_spin;
 	DB_IO *db_io;
+	DB_C_TXN *running_c_txn;
+	DB_C_TXN *committing_c_txn;
 };
 
 

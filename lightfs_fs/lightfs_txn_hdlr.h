@@ -17,6 +17,7 @@
 //#define C_TXN_BLOOM_M_BYTES 791 // 512 items, p=0.01
 #define C_TXN_BLOOM_K 3
 #define C_TXN_COMMITTING_LIMIT 16
+#define RUNNING_C_TXN_LIMIT 16
 #define TXN_LIMIT 128 * 1024
 #define TXN_THRESHOLD 64 * 1024
 #define DBC_LIMIT 1024
@@ -32,6 +33,7 @@ static inline void txn_hdlr_alloc(struct __lightfs_txn_hdlr **__txn_hdlr)
 	_txn_hdlr->ordered_c_txn_cnt = 0;
 	_txn_hdlr->orderless_c_txn_cnt = 0;
 	_txn_hdlr->committing_c_txn_cnt = 0;
+	_txn_hdlr->running_c_txn_cnt = 0;
 	init_waitqueue_head(&_txn_hdlr->wq);
 	init_waitqueue_head(&_txn_hdlr->txn_wq);
 	INIT_LIST_HEAD(&_txn_hdlr->txn_list);
@@ -43,9 +45,12 @@ static inline void txn_hdlr_alloc(struct __lightfs_txn_hdlr **__txn_hdlr)
 	spin_lock_init(&_txn_hdlr->ordered_c_txn_spin);
 	spin_lock_init(&_txn_hdlr->orderless_c_txn_spin);
 	spin_lock_init(&_txn_hdlr->committed_c_txn_spin);
+	spin_lock_init(&_txn_hdlr->running_c_txn_spin);
 	_txn_hdlr->state = false;
 	_txn_hdlr->contention = false;
+	_txn_hdlr->running_c_txn = NULL;
 	*__txn_hdlr = _txn_hdlr;
+	
 }
 
 static inline void c_txn_list_alloc(DB_C_TXN_LIST **c_txn_list, DB_C_TXN *c_txn)
@@ -122,6 +127,7 @@ int lightfs_txn_hdlr_init(void);
 int lightfs_txn_hdlr_destroy(void);
 int lightfs_bstore_txn_insert(DB *, DB_TXN *, DBT *, DBT *, uint32_t, enum lightfs_req_type);
 int lightfs_bstore_txn_get(DB *, DB_TXN *, DBT *, DBT *, uint32_t, enum lightfs_req_type);
+int lightfs_bstore_txn_sync_put(DB *, DB_TXN *, DBT *, DBT *, uint32_t, enum lightfs_req_type);
 int lightfs_bstore_dbc_cursor(DB *, DB_TXN *, DBC **, enum lightfs_req_type);
 
 #endif

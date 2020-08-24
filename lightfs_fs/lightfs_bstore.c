@@ -5,6 +5,8 @@
 #include <linux/slab.h>
 
 #include "ftfs_fs.h"
+#include "lightfs_db_env.h"
+#include "lightfs_db.h"
 
 size_t db_cachesize;
 
@@ -127,10 +129,10 @@ copy_child_meta_dbt_from_inode(DBT *dbt, struct inode *dir, const char *name)
 {
 	char *meta_key;
 	size_t size;
-	uint64_t parent_ino = dir->ino;
+	uint64_t parent_ino = dir->i_ino;
 
 	size = PATH_POS + strlen(name) + 1;
-	BUG_ON(size > dbt->ulen)
+	BUG_ON(size > dbt->ulen);
 	ftfs_key_set_magic(meta_key, META_KEY_MAGIC);
 	ftfs_key_set_ino(meta_key, parent_ino);
 	sprintf(ftfs_key_path(meta_key), "%s", name);
@@ -139,12 +141,12 @@ copy_child_meta_dbt_from_inode(DBT *dbt, struct inode *dir, const char *name)
 }
 
 static void
-copy_child_data_dbt_from_inode(DBT *dbt, struct inode *inode,
+copy_child_data_dbt_from_inode(DBT *data_dbt, struct inode *inode,
                                   const char *name, uint64_t block_num)
 {
 	char *data_key = data_dbt->data;
 	size_t size;
-	uint64_t ino = inode->ino;
+	uint64_t ino = inode->i_ino;
 
 	size = PATH_POS + DATA_META_KEY_SIZE_DIFF;
 	BUG_ON(size > data_dbt->ulen);
@@ -152,7 +154,7 @@ copy_child_data_dbt_from_inode(DBT *dbt, struct inode *inode,
 	ftfs_key_set_ino(data_key, ino);
 	ftfs_data_key_set_blocknum(data_key, size, block_num);
 
-	dbt->size = size;
+	data_dbt->size = size;
 }
 
 static inline void
@@ -214,9 +216,6 @@ copy_data_dbt_movdir(const DBT *old_prefix_dbt, const DBT *new_prefix_dbt,
 static int
 meta_key_is_child_of_meta_key(char *child_key, char *parent_key)
 {
-	char *last_slash;
-	size_t first_part, second_part;
-
 	if (ftfs_key_get_ino(child_key) != ftfs_key_get_ino(parent_key))
 		return 0;
 	else
@@ -234,11 +233,11 @@ int ftfs_bstore_get_ino(DB *meta_db, DB_TXN *txn, ino_t *ino)
 	dbt_setup(&ino_val_dbt, ino, sizeof(*ino));
 
 	ret = meta_db->get(meta_db, txn, &ino_key_dbt,
-	                   &ino_val_dbt, DB_GET_FLAGS);
+	                   &ino_val_dbt, LIGHTFS_META_GET);
 	if (ret == DB_NOTFOUND) {
 		*ino = FTFS_ROOT_INO + 1;
 		ret = meta_db->put(meta_db, txn, &ino_key_dbt,
-		                   &ino_val_dbt, DB_PUT_FLAGS);
+		                   &ino_val_dbt, LIGHTFS_META_SET);
 	}
 
 	return ret;
@@ -256,11 +255,11 @@ int ftfs_bstore_update_ino(DB *meta_db, DB_TXN *txn, ino_t ino)
 	dbt_setup(&ino_val_dbt, &curr_ino, sizeof(curr_ino));
 
 	ret = meta_db->get(meta_db, txn, &ino_key_dbt,
-	                   &ino_val_dbt, DB_GET_FLAGS);
+	                   &ino_val_dbt, LIGHTFS_META_GET);
 	if (!ret && ino > curr_ino) {
 		curr_ino = ino;
 		ret = meta_db->put(meta_db, txn, &ino_key_dbt,
-		                   &ino_val_dbt, DB_PUT_FLAGS);
+		                   &ino_val_dbt, LIGHTFS_META_SET);
 	}
 
 	return ret;
@@ -611,7 +610,7 @@ int ftfs_bstore_meta_get(DB *meta_db, DBT *meta_dbt, DB_TXN *txn,
 
 	dbt_setup(&value, metadata, sizeof(*metadata));
 
-	ret = meta_db->get(meta_db, txn, meta_dbt, &value, DB_GET_FLAGS);
+	ret = meta_db->get(meta_db, txn, meta_dbt, &value, LIGHTFS_META_GET);
 	if (ret == DB_NOTFOUND)
 		ret = -ENOENT;
 
@@ -625,12 +624,23 @@ int ftfs_bstore_meta_put(DB *meta_db, DBT *meta_dbt, DB_TXN *txn,
 
 	dbt_setup(&value, metadata, sizeof(*metadata));
 
-	return meta_db->put(meta_db, txn, meta_dbt, &value, DB_PUT_FLAGS);
+	return meta_db->put(meta_db, txn, meta_dbt, &value, LIGHTFS_META_SET);
 }
+
+int ftfs_bstore_meta_sync_put(DB *meta_db, DBT *meta_dbt, DB_TXN *txn,
+						 struct ftfs_metadata *metadata)
+{
+	DBT value;
+
+	dbt_setup(&value, metadata, sizeof(*metadata));
+
+	return meta_db->sync_put(meta_db, txn, meta_dbt, &value, LIGHTFS_META_SYNC_SET);
+}
+
 
 int ftfs_bstore_meta_del(DB *meta_db, DBT *meta_dbt, DB_TXN *txn)
 {
-	return meta_db->del(meta_db, txn, meta_dbt, DB_DEL_FLAGS);
+	return meta_db->del(meta_db, txn, meta_dbt, LIGHTFS_META_DEL);
 }
 
 static unsigned char filetype_table[] = {
@@ -725,7 +735,7 @@ int ftfs_bstore_get(DB *data_db, DBT *data_dbt, DB_TXN *txn, void *buf)
 	dbt_setup(&value, buf, FTFS_BSTORE_BLOCKSIZE);
 
 	//TODO: memset 처리
-	ret = data_db->get(data_db, txn, data_dbt, &value, DB_GET_FLAGS);
+	ret = data_db->get(data_db, txn, data_dbt, &value, LIGHTFS_DATA_GET);
 	if (!ret && value.size < FTFS_BSTORE_BLOCKSIZE)
 		memset(buf + value.size, 0, FTFS_BSTORE_BLOCKSIZE - value.size);
 	if (ret == DB_NOTFOUND)
@@ -744,8 +754,8 @@ int ftfs_bstore_put(DB *data_db, DBT *data_dbt, DB_TXN *txn,
 	dbt_setup(&value, buf, len);
 
 	ret = is_seq ?
-	      data_db->seq_put(data_db, txn, data_dbt, &value, DB_PUT_FLAGS) :
-	      data_db->put(data_db, txn, data_dbt, &value, DB_PUT_FLAGS);
+	      data_db->seq_put(data_db, txn, data_dbt, &value, LIGHTFS_DATA_SEQ_SET) :
+	      data_db->put(data_db, txn, data_dbt, &value, LIGHTFS_DATA_SET);
 
 	return ret;
 }
@@ -768,7 +778,7 @@ int ftfs_bstore_update(DB *data_db, DBT *data_dbt, DB_TXN *txn,
 
 	dbt_setup(&extra_dbt, info, info_size);
 
-	ret = data_db->update(data_db, txn, data_dbt, &extra_dbt, DB_UPDATE_FLAGS);
+	ret = data_db->update(data_db, txn, data_dbt, &extra_dbt, offset, LIGHTFS_DATA_UPDATE);
 
 	kfree(info);
 	return ret;
@@ -801,7 +811,7 @@ int ftfs_bstore_trunc(DB *data_db, DBT *meta_dbt,
 	ret = data_db->del_multi(data_db, txn,
 	                         &min_data_key_dbt,
 	                         &max_data_key_dbt,
-	                         0, 0);
+	                         0, LIGHTFS_DATA_DEL_MULTI);
 
 	if (!ret && offset) {
 		info.offset = offset;
@@ -810,7 +820,7 @@ int ftfs_bstore_trunc(DB *data_db, DBT *meta_dbt,
 		ftfs_data_key_set_blocknum(((char *)min_data_key_dbt.data),
 		                           min_data_key_dbt.size, new_num);
 		ret = data_db->update(data_db, txn, &min_data_key_dbt,
-		                      &extra_dbt, DB_UPDATE_FLAGS);
+		                      &extra_dbt, offset, LIGHTFS_DATA_UPDATE);
 	}
 
 	dbt_destroy(&max_data_key_dbt);
@@ -961,14 +971,16 @@ static int ftfs_die_cb(DBT const *key, DBT const *val, void *extra)
 	return 0;
 }
 
-int ftfs_dir_is_empty(DB *meta_db, DBT *meta_dbt, DB_TXN *txn, int *is_empty)
+int ftfs_dir_is_empty(DB *meta_db, DBT *meta_dbt, DB_TXN *txn, int *is_empty, struct inode *inode)
 {
 	int ret, r;
 	struct ftfs_die_cb_info info;
 	DBT start_meta_dbt;
 	DBC *cursor;
 
-	ret = alloc_child_meta_dbt_from_meta_dbt(&start_meta_dbt, meta_dbt, "");
+	//KOO:key
+	//ret = alloc_child_meta_dbt_from_meta_dbt(&start_meta_dbt, meta_dbt, "");
+	ret = alloc_child_meta_dbt_from_inode(&start_meta_dbt, inode, "");
 	if (ret)
 		return ret;
 
@@ -1044,7 +1056,7 @@ ftfs_bstore_move_copy(DB *meta_db, DB *data_db, DBT *old_meta_dbt,
 			copy_meta_dbt_movdir(&old_prefix_dbt, &new_prefix_dbt,
 			                     &key_dbt[rot], &new_key_dbt);
 			ret = meta_db->put(meta_db, txn, &new_key_dbt, &val_dbt,
-			                   DB_PUT_FLAGS);
+			                   LIGHTFS_DATA_SET);
 			if (ret) {
 freak_out:
 				cursor->c_close(cursor);
@@ -1054,7 +1066,7 @@ freak_out:
 			r = cursor->c_get(cursor, &key_dbt[rot], &val_dbt,
 			                  DB_NEXT);
 			ret = meta_db->del(meta_db, txn, &key_dbt[1 - rot],
-			                   DB_DEL_FLAGS);
+			                   LIGHTFS_META_DEL);
 			if (ret)
 				goto freak_out;
 		}
@@ -1081,14 +1093,14 @@ freak_out:
 			copy_data_dbt_movdir(&old_prefix_dbt, &new_prefix_dbt,
 			                     &key_dbt[rot], &new_key_dbt);
 			ret = data_db->put(data_db, txn, &new_key_dbt, &val_dbt,
-			                   DB_PUT_FLAGS);
+			                   LIGHTFS_DATA_SET);
 			if (ret)
 				goto freak_out;
 			rot = 1 - rot;
 			r = cursor->c_get(cursor, &key_dbt[rot], &val_dbt,
 			                  DB_NEXT);
 			ret = data_db->del(data_db, txn, &key_dbt[1 - rot],
-			                   DB_DEL_FLAGS);
+			                   LIGHTFS_DATA_DEL);
 			if (ret)
 				goto freak_out;
 		}
@@ -1111,7 +1123,7 @@ freak_out:
 			copy_data_dbt_movdir(old_meta_dbt, new_meta_dbt,
 			                     &key_dbt[rot], &new_key_dbt);
 			ret = data_db->put(data_db, txn, &new_key_dbt, &val_dbt,
-			                   DB_PUT_FLAGS);
+			                   LIGHTFS_DATA_SET);
 			if (ret)
 				goto freak_out;
 
@@ -1119,7 +1131,7 @@ freak_out:
 			r = cursor->c_get(cursor, &key_dbt[rot], &val_dbt,
 			                  DB_NEXT);
 			ret = data_db->del(data_db, txn, &key_dbt[1 - rot],
-			                   DB_DEL_FLAGS);
+			                   LIGHTFS_DATA_DEL);
 			if (ret)
 				goto freak_out;
 		}

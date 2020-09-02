@@ -13,6 +13,9 @@ void
 bloomfilter_init(struct bloomfilter *bloomfilter, unsigned int m, unsigned int k);
 
 void
+bloomfilter_re_init(struct bloomfilter *bloomfilter, unsigned int m, unsigned int k);
+
+void
 bloomfilter_set(struct bloomfilter *bloomfilter, const void *key, size_t len);
 
 int

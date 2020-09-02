@@ -47,14 +47,26 @@ int lightfs_db_update(DB *db, DB_TXN *txn, const DBT *key, const DBT *value, lof
 
 int lightfs_db_del (DB *db , DB_TXN *txn, DBT *key, enum lightfs_req_type type)
 {
+	ftfs_error(__func__, "\n");
 	return lightfs_bstore_txn_insert(db, txn, key, NULL, 0, type);
 }
 
+#ifdef PINK
+int lightfs_db_del_multi (DB *db, DB_TXN *txn, DBT *min_key, uint32_t key_cnt, bool a, enum lightfs_req_type type)
+{
+	//TODO:: fix del_multi
+	if (min_key == 0)
+		return 0;
+	else
+		return lightfs_bstore_txn_insert(db, txn, min_key, NULL, key_cnt, type);
+}
+#else 
 int lightfs_db_del_multi (DB *db, DB_TXN *txn, DBT *min_key, DBT *max_key, bool a, enum lightfs_req_type type)
 {
 	//TODO:: fix del_multi
 	return lightfs_bstore_txn_insert(db, txn, min_key, NULL, 0, type);
 }
+#endif
 
 int lightfs_db_cursor (DB *db, DB_TXN *txn, DBC **dbc, enum lightfs_req_type type)
 {
@@ -89,6 +101,7 @@ int lightfs_db_create(DB **db, DB_ENV *env, uint32_t flags)
 #ifdef EMULATION
 	db_create(db, env, flags);
 #endif
+	BUG_ON((*db)->i == NULL);
 	(*db)->dbenv = env;
 
 	(*db)->open = lightfs_db_open;

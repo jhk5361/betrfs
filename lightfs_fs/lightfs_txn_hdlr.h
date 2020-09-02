@@ -12,23 +12,28 @@
 #include "tokudb.h"
 #include "lightfs.h"
 
-#define C_TXN_LIMIT_BYTES 2 * 1024 * 1024
+#define C_TXN_LIMIT_BYTES (2 * 1024 * 1024)
 #define C_TXN_BLOOM_M_BYTES 308 // 512 items, p=0.1
 //#define C_TXN_BLOOM_M_BYTES 791 // 512 items, p=0.01
 #define C_TXN_BLOOM_K 3
-#define C_TXN_COMMITTING_LIMIT 16
+//#define C_TXN_COMMITTING_LIMIT 16
+#define C_TXN_COMMITTING_LIMIT 50
 #define RUNNING_C_TXN_LIMIT 16
-#define TXN_LIMIT 128 * 1024
-#define TXN_THRESHOLD 64 * 1024
+//#define TXN_LIMIT 10
+#define TXN_LIMIT (128 * 1024)
+//#define TXN_THRESHOLD 5
+#define TXN_THRESHOLD (64 * 1024)
 #define DBC_LIMIT 1024
-#define ITER_BUF_SIZE 32 * 1024
+#define ITER_BUF_SIZE (32 * 1024)
+#define KMEM_CACHE_FLAG (SLAB_RECLAIM_ACCOUNT | SLAB_HWCACHE_ALIGN)
 
 
 static inline void txn_hdlr_alloc(struct __lightfs_txn_hdlr **__txn_hdlr)
 {
 	struct __lightfs_txn_hdlr *_txn_hdlr = (struct __lightfs_txn_hdlr *)kmalloc(sizeof(struct __lightfs_txn_hdlr), GFP_KERNEL);
 
-	_txn_hdlr->txn_id = 0;
+	_txn_hdlr->txn_id = 1;
+	_txn_hdlr->running_c_txn_id = 0;
 	_txn_hdlr->txn_cnt = 0;
 	_txn_hdlr->ordered_c_txn_cnt = 0;
 	_txn_hdlr->orderless_c_txn_cnt = 0;
@@ -68,8 +73,8 @@ static inline void c_txn_list_free(DB_C_TXN_LIST *c_txn_list)
 static inline int calc_txn_buf_size(DB_TXN_BUF *txn_buf)
 {
 	int total = 0;
-	total += sizeof(uint32_t) + sizeof(uint8_t) + sizeof(uint16_t) + txn_buf->key_len + sizeof(uint32_t) + sizeof(uint32_t) + PAGE_SIZE;
-	// total = tid, type, key_len, key, val_off, val_len, val
+	total += sizeof(uint8_t) + sizeof(uint16_t) + txn_buf->key_len + sizeof(uint16_t) + sizeof(uint16_t) + txn_buf->len;
+	// total = type, key_len, key, val_off, val_len, val
 	
 	return total;
 }
@@ -94,6 +99,7 @@ static inline void txn_buf_setup(DB_TXN_BUF *txn_buf, const void *data, uint32_t
 	txn_buf->off = off;
 	txn_buf->len = size;
 	txn_buf->buf = (char*)data;
+	txn_buf->type = type;
 }
 
 static inline void txn_buf_setup_cpy(DB_TXN_BUF *txn_buf, const void *data, uint32_t off, uint32_t size, enum lightfs_req_type type)
@@ -102,6 +108,7 @@ static inline void txn_buf_setup_cpy(DB_TXN_BUF *txn_buf, const void *data, uint
 	txn_buf->off = off;
 	txn_buf->len = size;
 	memcpy(txn_buf->buf+off, data_buf, size);
+	txn_buf->type = type;
 }
 
 static inline void alloc_txn_buf_key_from_dbt(DB_TXN_BUF *txn_buf, DBT *dbt)
@@ -115,7 +122,9 @@ static inline void alloc_txn_buf_key_from_dbt(DB_TXN_BUF *txn_buf, DBT *dbt)
 static inline uint32_t copy_dbt_from_dbc(DBC *dbc, DBT *dbt)
 {
 	dbt->size = *((uint32_t *)(dbc->buf + dbc->idx));
-	memcpy(dbt->data, dbc->buf + dbc->idx + sizeof(uint32_t), dbt->size);
+	if (dbt->size) {
+		memcpy(dbt->data, dbc->buf + dbc->idx + sizeof(uint32_t), dbt->size);
+	}
 	
 	return sizeof(uint32_t) + dbt->size;
 }
@@ -130,4 +139,6 @@ int lightfs_bstore_txn_get(DB *, DB_TXN *, DBT *, DBT *, uint32_t, enum lightfs_
 int lightfs_bstore_txn_sync_put(DB *, DB_TXN *, DBT *, DBT *, uint32_t, enum lightfs_req_type);
 int lightfs_bstore_dbc_cursor(DB *, DB_TXN *, DBC **, enum lightfs_req_type);
 
+
 #endif
+

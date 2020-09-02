@@ -4,7 +4,41 @@
 #define _FTFS_H
 
 #  define FTFS_DEBUG_ON(err)
-static inline void ftfs_error (const char * function, const char * fmt, ...) {}
-static inline void ftfs_log (const char * function, const char * fmt, ...) {}
+
+static inline void ftfs_error (const char * function, const char * fmt, ...)
+{
+#ifdef FTFS_DEBUG
+	va_list args;
+
+	va_start(args, fmt);
+	printk(KERN_CRIT "ftfs error: %s: ", function);
+	vprintk(fmt, args);
+	printk(KERN_CRIT "\n");
+	va_end(args);
+#endif
+}
+
+//samething as ftfs_error...when ftfs fs calls needs to dump info out
+static inline void ftfs_log(const char * function, const char * fmt, ...)
+{
+#ifdef FTFS_DEBUG
+	va_list args;
+	va_start(args, fmt);
+	printk(KERN_ALERT "ftfs log: %s: ", function);
+	vprintk(fmt, args);
+	printk(KERN_ALERT "\n");
+	va_end(args);
+#endif
+}
+
+static inline void print_key(const char *function, char *key, int len) {
+	int i;
+	for (i = 0; i < len; i++) {
+		ftfs_log(function, "%d", key[i]);
+	}
+	return;
+}
+
+
 
 #endif

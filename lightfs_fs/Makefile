@@ -7,9 +7,10 @@ endif
 obj-m += ftfs.o
 
 
-KBUILD_CFLAGS += -DFTFS_DEBUG -DLIGHTFS -DEMULATION -DRB_LOCK #-DSOUTHBOUND_DEBUG #-DFTFS_MEM_DEBUG # -DFTFS_DEBUG_PTRS
+KBUILD_CFLAGS +=  -DLIGHTFS -DEMULATION -DRB_LOCK -DFTFS_DEBUG -DPINK #-DLIGHTFS_UPSERT #-DSOUTHBOUND_DEBUG #-DFTFS_MEM_DEBUG # -DFTFS_DEBUG_PTRS
+#KBUILD_CFLAGS +=  -DLIGHTFS -DEMULATION -DRB_LOCK #-DFTFS_DEBUG #-DSOUTHBOUND_DEBUG #-DFTFS_MEM_DEBUG # -DFTFS_DEBUG_PTRS
 #ftfs-y := ftfs_super.o ftfs_bstore.o ftfs_metadata.o rbtreekv.o ftfs_module.o
-ftfs-y := lightfs_super.o lightfs_bstore.o lightfs_txn_hdlr.o lightfs_io.o lightfs_db.o lightfs_db_env.o bloomfilter.o murmur3.o rbtreekv.o ftfs_module.o
+ftfs-y := lightfs_super.o lightfs_bstore.o lightfs_txn_hdlr.o lightfs_io.o lightfs_db.o lightfs_db_env.o lightfs_cache.o bloomfilter.o murmur3.o rbtreekv.o ftfs_module.o
 
 all:
 	make -C /lib/modules/$(KDIR)/build M=$(PWD) modules

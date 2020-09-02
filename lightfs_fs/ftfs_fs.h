@@ -66,6 +66,7 @@ void exit_ftfs_fs(void);
 #define block_get_off_by_position(pos)		\
 		((pos) & ((FTFS_BSTORE_BLOCKSIZE) - 1))
 
+
 #define ftfs_get_block_num_by_size(size)	\
 		(((size) == 0) ? 0 : (((size) - 1) >> (FTFS_BSTORE_BLOCKSIZE_BITS)) + 1)
 
@@ -189,6 +190,12 @@ key_is_same_of_key(char *key1, char *key2)
 	//return *(uint64_t *)(key1 + INO_POS) == *(uint64_t *)(key2 + INO_POS) &&
 	//       !strcmp(ftfs_key_path(key1), ftfs_key_path(key2));
 	return 1;
+}
+
+static inline int
+key_is_same_of_ino(char *key1, ino_t ino)
+{
+	return ftfs_key_get_ino(key1) == ino;
 }
 
 static inline int
@@ -436,7 +443,7 @@ int ftfs_bstore_meta_del(DB *meta_db, DBT *meta_dbt, DB_TXN *txn);
 #ifdef LIGHTFS
 int ftfs_bstore_meta_readdir(DB *meta_db, DBT *meta_dbt, DB_TXN *txn,
                              struct dir_context *ctx, struct inode *inode);
-int ftfs_bstore_get(DB *data_db, DBT *data_dbt, DB_TXN *txn, void *buf); //TODO
+int ftfs_bstore_get(DB *data_db, DBT *data_dbt, DB_TXN *txn, void *buf, struct inode *inode); //TODO
 int ftfs_bstore_put(DB *data_db, DBT *data_dbt, DB_TXN *txn,
                     const void *buf, size_t len, int is_seq); //TODO
 int ftfs_bstore_update(DB *data_db, DBT *data_dbt, DB_TXN *txn,

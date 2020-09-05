@@ -634,6 +634,7 @@ static int ftfs_readpages(struct file *filp, struct address_space *mapping,
 	return ret;
 }
 
+#ifdef LIGHTFS_UPSERT
 static int
 __ftfs_updatepage(struct ftfs_sb_info *sbi, struct inode *inode, DBT *meta_dbt,
                   struct page *page, size_t len, loff_t offset, DB_TXN *txn)
@@ -661,6 +662,7 @@ __ftfs_updatepage(struct ftfs_sb_info *sbi, struct inode *inode, DBT *meta_dbt,
 
 	return ret;
 }
+#endif
 
 static int
 __ftfs_writepage(struct ftfs_sb_info *sbi, struct inode *inode, DBT *meta_dbt,
@@ -814,7 +816,6 @@ __ftfs_writepages_write_pages(struct ftfs_wp_node *list, int nr_pages,
 	DBT *meta_dbt;
 	char *data_key;
 	DB_TXN *txn = NULL;
-	volatile bool commit_flag = 0;
 
 	meta_dbt = ftfs_get_read_lock(FTFS_I(inode));
 	data_key = data_dbt->data;
@@ -850,7 +851,7 @@ retry:
 			goto out;
 		}
 		if ((i % LIGHTFS_TXN_LIMIT) == LIGHTFS_TXN_LIMIT-1) {
-			ftfs_error(__func__, "존나 크네...%d\n", i);
+			//ftfs_error(__func__, "존나 크네...%d\n", i);
 			ret = ftfs_bstore_txn_commit(txn, DB_TXN_NOSYNC);
 			COMMIT_JUMP_ON_CONFLICT(ret, retry);
 			txn = NULL;
@@ -1052,7 +1053,7 @@ ftfs_write_begin(struct file *file, struct address_space *mapping,
 	int ret = 0;
 	struct page *page;
 	struct inode *inode = mapping->host;
-	struct dentry *dentry = file_dentry(file);
+	//struct dentry *dentry = file_dentry(file);
 	pgoff_t index = pos >> PAGE_SHIFT;
 	unsigned from, to;
 	struct ftfs_sb_info *sbi = inode->i_sb->s_fs_info;
@@ -1100,11 +1101,13 @@ ftfs_write_end(struct file *file, struct address_space *mapping,
 	/* make sure that ftfs can't guarantee uptodate page */
 	loff_t last_pos = pos + copied;
 	struct inode *inode = page->mapping->host;
-	struct ftfs_sb_info *sbi = inode->i_sb->s_fs_info;
-	DBT *meta_dbt;
 	char *buf;
+#ifdef LIGHTFS_UPSERT
+	struct ftfs_sb_info *sbi = inode->i_sb->s_fs_info;
 	int ret;
 	DB_TXN *txn;
+	DBT *meta_dbt;
+#endif
 
 	/*
 	 * 1. if page is uptodate/writesize=PAGE_SIZE (we have new content),
@@ -1339,7 +1342,7 @@ ftfs_fsync(struct file *file, loff_t start, loff_t end, int datasync)
 {
 	int ret;
 	struct ftfs_sb_info *sbi = file_inode(file)->i_sb->s_fs_info;
-	struct dentry *dentry = file_dentry(file);
+	//struct dentry *dentry = file_dentry(file);
 	struct inode *inode = file_inode(file);
 	DBT *meta_dbt;
 	struct ftfs_metadata meta;
@@ -1845,7 +1848,8 @@ static const char *ftfs_get_link(struct dentry *dentry,
 
 	sbi = dentry->d_sb->s_fs_info;
 	ftfs_inode = FTFS_I(dentry->d_inode);
-	DBT *meta_dbt, data_dbt;
+	DBT *meta_dbt;
+	DBT data_dbt;
 	DB_TXN *txn;
 
 	buf = kmalloc(FTFS_BSTORE_BLOCKSIZE, GFP_KERNEL);
@@ -2060,7 +2064,7 @@ static void ftfs_put_super(struct super_block *sb)
 
 static int ftfs_sync_fs(struct super_block *sb, int wait)
 {
-	struct ftfs_sb_info *sbi = sb->s_fs_info;
+	//struct ftfs_sb_info *sbi = sb->s_fs_info;
 
 	//return ftfs_bstore_flush_log(sbi->db_env);
 	return 0;

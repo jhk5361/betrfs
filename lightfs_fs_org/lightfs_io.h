@@ -2,8 +2,9 @@
 #define __LIGHTFS_IO_H__
 
 #include "lightfs.h"
-#include "ftfs.h"
-#include "./cheeze/cheeze.h"
+
+#define LIGHTFS_IO_LARGE_BUF (2 * 1024 * 1024 + 200 * 1024)
+#define LIGHTFS_IO_SMALL_BUF (8 * 1024)
 
 int lightfs_io_create (DB_IO **db_io);
 
@@ -13,16 +14,9 @@ static inline int lightfs_io_set_txn_id(char *buf, uint32_t txn_id, int idx)
 	return idx + sizeof(uint32_t);
 }
 
-static inline int lightfs_io_set_cnt(char *buf, uint16_t cnt, int idx)
-{
-	*((uint16_t *)buf) = cnt;
-	return idx + sizeof(uint16_t);
-}
-
 static inline int lightfs_io_set_type(char *buf, uint8_t type, int idx)
 {
 	*buf = type;
-	//ftfs_error(__func__, "TYPE:%d\n", type);
 	return idx + sizeof(uint8_t);
 }
 
@@ -107,31 +101,28 @@ static inline int lightfs_io_set_buf_del_multi(char *buf, uint8_t type, uint16_t
 	return idx;
 }
 
-static inline int lightfs_io_set_buf_get(char *buf, uint8_t type, uint16_t key_len, char *key, uint16_t value_len, int idx)
+static inline int lightfs_io_set_buf_get(char *buf, uint8_t type, uint16_t key_len, char *key, uint16_t value_len, char *buf_ptr, int idx)
 {
 	idx = lightfs_io_set_type(buf, type, idx);
 	idx = lightfs_io_set_key_len(buf, key_len, idx);
 	idx = lightfs_io_set_key(buf, key_len, key, idx);
 	idx = lightfs_io_set_value_len(buf, value_len, idx);
+	idx = lightfs_io_set_buf_ptr(buf, buf_ptr, idx);
 	return idx;
 }
 
-static inline int lightfs_io_set_buf_iter(char *buf, uint8_t type, uint16_t key_len, char *key, uint16_t off, uint16_t value_len, int idx)
+static inline int lightfs_io_set_buf_iter(char *buf, uint8_t type, uint16_t key_len, char *key, uint16_t off, uint16_t value_len, char *buf_ptr, int idx)
 {
 	idx = lightfs_io_set_type(buf, type, idx);
 	idx = lightfs_io_set_key_len(buf, key_len, idx);
 	idx = lightfs_io_set_key(buf, key_len, key, idx);
 	idx = lightfs_io_set_off(buf, off, idx);
 	idx = lightfs_io_set_value_len(buf, value_len, idx);
+	idx = lightfs_io_set_buf_ptr(buf, buf_ptr, idx);
 	return idx;
 }
 
-static inline void lightfs_io_set_cheeze_req(struct cheeze_req_user *req, int buf_len, char *buf, char *ret_buf)
-{
-	req->buf_len = buf_len;
-	req->buf = buf;
-	req->ret_buf = ret_buf;
-}
+
 
 
 #endif

@@ -24,7 +24,7 @@
 //#define TXN_THRESHOLD 5
 #define TXN_THRESHOLD (64 * 1024)
 #define DBC_LIMIT 1024
-#define ITER_BUF_SIZE LIGHTFS_IO_LARGE_BUF
+#define ITER_BUF_SIZE (32 * 1024)
 #define KMEM_CACHE_FLAG (SLAB_RECLAIM_ACCOUNT | SLAB_HWCACHE_ALIGN)
 
 
@@ -117,13 +117,6 @@ static inline void alloc_txn_buf_key_from_dbt(DB_TXN_BUF *txn_buf, DBT *dbt)
 	memcpy(txn_buf->key, dbt->data, dbt->size);
 	txn_buf->key_len = dbt->size;
 }
-
-static inline void copy_txn_buf_key_from_dbt(DB_TXN_BUF *txn_buf, DBT *dbt)
-{
-	memcpy(txn_buf->key, dbt->data, dbt->size);
-	txn_buf->key_len = dbt->size;
-}
-
 
 
 static inline uint32_t copy_dbt_from_dbc(DBC *dbc, DBT *dbt)

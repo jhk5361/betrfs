@@ -87,7 +87,6 @@ int lightfs_db_env_create(DB_ENV **envp, uint32_t flags)
 	(*envp)->get_engine_status_text = lightfs_db_env_get_engine_status_text;
 	(*envp)->log_flush = lightfs_db_env_log_flush;
 
-	ftfs_error(__func__, "txn_hdlr\n");
 	lightfs_txn_hdlr_init();
 	
 

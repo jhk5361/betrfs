@@ -142,6 +142,7 @@ copy_child_meta_dbt_from_inode(DBT *dbt, struct inode *dir, const char *name)
 	dbt->size = size;
 }
 
+#if 0
 static void
 copy_child_data_dbt_from_inode(DBT *data_dbt, struct inode *inode,
                                   const char *name, uint64_t block_num)
@@ -158,6 +159,7 @@ copy_child_data_dbt_from_inode(DBT *data_dbt, struct inode *inode,
 
 	data_dbt->size = size;
 }
+#endif
 
 static inline void
 copy_subtree_max_meta_dbt_from_meta_dbt(DBT *dbt, DBT *parent_dbt)
@@ -215,6 +217,7 @@ copy_data_dbt_movdir(const DBT *old_prefix_dbt, const DBT *new_prefix_dbt,
 	new_dbt->size = size;
 }
 
+#if 0
 static int
 meta_key_is_child_of_meta_key(char *child_key, char *parent_key)
 {
@@ -225,6 +228,7 @@ meta_key_is_child_of_meta_key(char *child_key, char *parent_key)
 	else
 		return 1;
 }
+#endif
 
 static int
 meta_key_is_child_of_ino(char *child_key, ino_t ino)
@@ -344,9 +348,6 @@ env_keyrename(const DBT *old_prefix, const DBT *new_prefix, const DBT *old_dbt,
 
 static void env_keyprint(const DBT *key, bool is_trace_printable)
 {
-#if FTFS_NO_PRINT
-	return;
-#else
 	if (key == NULL) {
 		if(is_trace_printable) {
 			trace_printk(KERN_INFO "ftfs_env_keypnt: key == NULL\n");
@@ -393,7 +394,6 @@ static void env_keyprint(const DBT *key, bool is_trace_printable)
 	} else {
 		BUG();
 	}
-#endif
 }
 
 static struct toku_db_key_operations ftfs_key_ops = {
@@ -720,7 +720,7 @@ int ftfs_bstore_meta_readdir(DB *meta_db, DBT *meta_dbt, DB_TXN *txn,
 	dbt_setup(&metadata_dbt, &meta, sizeof(meta));
 	dbt_setup_buf(&indirect_meta_dbt, indirect_meta_key,
 	              SIZEOF_CIRCLE_ROOT_META_KEY);
-	ret = meta_db->cursor(meta_db, txn, &cursor, DB_CURSOR_FLAGS);
+	ret = meta_db->cursor(meta_db, txn, &cursor, LIGHTFS_META_CURSOR);
 	if (ret)
 		goto out;
 
@@ -744,6 +744,7 @@ int ftfs_bstore_meta_readdir(DB *meta_db, DBT *meta_dbt, DB_TXN *txn,
 		type = ftfs_get_type(meta.u.st.st_mode);
 		//name = strrchr(ftfs_key_path(child_meta_key), '\x01') + 1;
 		name = ftfs_key_path(child_meta_key);
+		ftfs_error(__func__, "child_meta_key name:%s, len = %d\n", name, strlen(name));
 		if (!dir_emit(ctx, name, strlen(name), ino, type))
 			break;
 
@@ -828,7 +829,6 @@ int ftfs_bstore_trunc(DB *data_db, DBT *meta_dbt,
 {
 	int ret;
 	DBT min_data_key_dbt, max_data_key_dbt, value;
-	int i;
 	loff_t size = i_size_read(inode);
 	uint64_t last_block_num = block_get_num_by_position(size);
 	uint64_t current_block_num = (offset == 0) ? new_num : (new_num + 1);
@@ -858,7 +858,7 @@ int ftfs_bstore_trunc(DB *data_db, DBT *meta_dbt,
 	ret = data_db->del_multi(data_db, txn, &min_data_key_dbt, last_block_num - current_block_num + 1, 0, LIGHTFS_DATA_DEL_MULTI);
 #else
 	do {
-		ftfs_error(__func__, "cur :%d, last: %d\n", current_block_num, last_block_num);
+		//ftfs_error(__func__, "cur :%d, last: %d\n", current_block_num, last_block_num);
 		ret = data_db->del(data_db, txn, &max_data_key_dbt, LIGHTFS_DATA_DEL);
 		if (ret) {
 			ftfs_error(__func__, "왜...\n");
@@ -997,15 +997,17 @@ int ftfs_bstore_scan_pages(DB *data_db, DBT *meta_dbt, DB_TXN *txn, struct ftio 
 	loff_t size = i_size_read(inode);
 	uint64_t current_block_num, block_cnt;
 	void *buf;
-	struct page *page = ftio_current_page(ftio);;
-	current_block_num = PAGE_TO_BLOCK_NUM(page);
-
-	block_cnt = block_get_num_by_position(size) - current_block_num + 1;
+	struct page *page;
 
 
 	//ftfs_error(__func__, "meta key path =%s\n", meta_key->path);
 	if (ftio_job_done(ftio))
 		return 0;
+
+	page = ftio_current_page(ftio);
+	current_block_num = PAGE_TO_BLOCK_NUM(page);
+	block_cnt = block_get_num_by_position(size) - current_block_num + 1;
+
 	//KOO:key
 	//ret = alloc_data_dbt_from_meta_dbt(&data_dbt, meta_dbt,
 	ret = alloc_data_dbt_from_inode(&data_dbt, inode,
@@ -1014,7 +1016,6 @@ int ftfs_bstore_scan_pages(DB *data_db, DBT *meta_dbt, DB_TXN *txn, struct ftio 
 		return ret;
 
 	if (block_cnt == 1) {
-		ftfs_error(__func__, "한개만 보낸다.\n");
 		buf = kmap(page);
 		ret = ftfs_bstore_get(data_db, &data_dbt, txn, buf, inode);
 		if (ret == -ENOENT) {
@@ -1022,10 +1023,16 @@ int ftfs_bstore_scan_pages(DB *data_db, DBT *meta_dbt, DB_TXN *txn, struct ftio 
 			ret = 0;
 		}
 		kunmap(page);
-		ftio_advance_page(ftio);
-		ftfs_bstore_fill_rest_page(ftio);
+		//ftfs_error(__func__, "ftio->ft_bvidx: %d, ftio->ft_vcnt: %d\n", ftio->ft_bvidx, ftio->ft_vcnt);
+		if (!(ftio_current_page(ftio) == ftio_last_page(ftio))) {
+			ftfs_error(__func__, "한개만 보낸다.\n");
+			ftio_advance_page(ftio);
+			ftfs_bstore_fill_rest_page(ftio);
+		} else {
+			ftio_advance_page(ftio);
+		}
 	} else {
-		ret = data_db->cursor(data_db, txn, &cursor, DB_CURSOR_FLAGS);
+		ret = data_db->cursor(data_db, txn, &cursor, LIGHTFS_DATA_CURSOR);
 		if (ret)
 			goto free_out;
 
@@ -1084,7 +1091,7 @@ int ftfs_dir_is_empty(DB *meta_db, DBT *meta_dbt, DB_TXN *txn, int *is_empty, st
 	if (ret)
 		return ret;
 
-	ret = meta_db->cursor(meta_db, txn, &cursor, DB_CURSOR_FLAGS);
+	ret = meta_db->cursor(meta_db, txn, &cursor, LIGHTFS_META_CURSOR);
 	if (ret)
 		goto out;
 
@@ -1145,7 +1152,7 @@ ftfs_bstore_move_copy(DB *meta_db, DB *data_db, DBT *old_meta_dbt,
 		rot = 0;
 		copy_child_meta_dbt_from_meta_dbt(&key_dbt[rot], old_meta_dbt, "");
 
-		ret = meta_db->cursor(meta_db, txn, &cursor, DB_CURSOR_FLAGS);
+		ret = meta_db->cursor(meta_db, txn, &cursor, LIGHTFS_META_CURSOR);
 		if (ret)
 			goto free_out;
 		r = cursor->c_get(cursor, &key_dbt[rot], &val_dbt, DB_SET_RANGE);
@@ -1183,7 +1190,7 @@ freak_out:
 		dbt_setup_buf(&val_dbt, block_buf, FTFS_BSTORE_BLOCKSIZE);
 		rot = 0;
 		copy_child_data_dbt_from_meta_dbt(&key_dbt[rot], old_meta_dbt, "", 0);
-		ret = data_db->cursor(data_db, txn, &cursor, DB_CURSOR_FLAGS);
+		ret = data_db->cursor(data_db, txn, &cursor, LIGHTFS_DATA_CURSOR);
 		if (ret)
 			goto free_out;
 		r = cursor->c_get(cursor, &key_dbt[rot], &val_dbt, DB_SET_RANGE);
@@ -1214,7 +1221,7 @@ freak_out:
 		rot = 0;
 
 		copy_data_dbt_from_meta_dbt(&key_dbt[rot], old_meta_dbt, 0);
-		ret = data_db->cursor(data_db, txn, &cursor, DB_CURSOR_FLAGS);
+		ret = data_db->cursor(data_db, txn, &cursor, LIGHTFS_DATA_CURSOR);
 		if (ret)
 			goto free_out;
 		r = cursor->c_get(cursor, &key_dbt[rot], &val_dbt, DB_SET_RANGE);

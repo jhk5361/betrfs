@@ -10,9 +10,6 @@
 #include <stdbool.h>
 #include <stdint.h>
 #else
-#include "faked_std.h"
-#include "ftfs_files.h"
-#
 #endif //__KERNEL__
 #if defined(__cplusplus) || defined(__cilkplusplus)
 extern "C" {
@@ -735,6 +732,7 @@ struct __lightfs_dbc {
   DB *dbp;
   int (*c_close) (DBC *);
   int (*c_get) (DBC *, DBT *, DBT *, uint32_t);
+  int (*set_default_bt_compare) (DB_ENV *, int (*bt_compare)(DB *, const DBT *, const DBT *));
   int idx;
   int old_idx;
   int buf_len;
@@ -742,10 +740,10 @@ struct __lightfs_dbc {
   DBT key;
   DBT value;
   void *extra;
-#ifdef CHEEZE
-  struct __lightfs_dbc *cheeze_dbc;
-#endif
 };
+
+
+
 
 #endif
 

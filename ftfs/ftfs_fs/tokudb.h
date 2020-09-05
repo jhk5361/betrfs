@@ -521,17 +521,17 @@ void db_env_try_gdb_stack_trace(const char *gdb_path) __attribute__((__visibilit
 #include <linux/list.h>
 
 enum lightfs_txn_state {
-	TXN_CREATED = 0,
-	TXN_COMMITTING = 1,
-	TXN_COMMITTED = 2,
-	TXN_ABORTED = 4,
-	TXN_INSERTING = 8,
-	TXN_TRANSFERING = 16,
-	TXN_FLUSH = 32,
+	TXN_COMMITTING,
+	TXN_COMMITTED,
+	TXN_ABORTED,
+	TXN_CREATED,
+	TXN_INSERTING,
+	TXN_TRANSFERING,
+	TXN_FLUSH,
 };
 
 enum lightfs_req_type {
-	LIGHTFS_META_GET = 0,
+	LIGHTFS_META_GET,
 	LIGHTFS_META_SET,
 	LIGHTFS_META_SYNC_SET,
 	LIGHTFS_META_DEL,
@@ -546,7 +546,7 @@ enum lightfs_req_type {
 	LIGHTFS_DATA_CURSOR,
 	LIGHTFS_DATA_UPDATE,
 	LIGHTFS_DATA_RENAME,
-	LIGHTFS_COMMIT,
+	LIGHTFS_FSYNC,
 };
 
 struct __lightfs_db_env {
@@ -677,11 +677,7 @@ struct __lightfs_db {
   int (*close) (DB*, uint32_t);
   int (*cursor) (DB *, DB_TXN *, DBC **, enum lightfs_req_type);
   int (*del) (DB *, DB_TXN *, DBT *, enum lightfs_req_type);
-#ifdef PINK
-  int (*del_multi) (DB *, DB_TXN *, DBT *, uint32_t , bool, enum lightfs_req_type);
-#else
   int (*del_multi) (DB *, DB_TXN *, DBT *, DBT *, bool, enum lightfs_req_type);
-#endif
   int (*fd) (DB *, int *);
   int (*get) (DB *, DB_TXN *, DBT *, DBT *, enum lightfs_req_type);
   int (*get_flags) (DB *, uint32_t *);
@@ -700,8 +696,8 @@ struct __lightfs_db {
 
 
 enum lightfs_c_txn_state {
-	C_TXN_ORDERED = 0,
-	C_TXN_ORDERLESS,
+	C_TXN_ORDERED,
+	C_TXN_ORDERLESS
 };
 
 struct __lightfs_db_txn {
@@ -735,6 +731,7 @@ struct __lightfs_dbc {
   DB *dbp;
   int (*c_close) (DBC *);
   int (*c_get) (DBC *, DBT *, DBT *, uint32_t);
+  int (*set_default_bt_compare) (DB_ENV *, int (*bt_compare)(DB *, const DBT *, const DBT *));
   int idx;
   int old_idx;
   int buf_len;
@@ -742,10 +739,10 @@ struct __lightfs_dbc {
   DBT key;
   DBT value;
   void *extra;
-#ifdef CHEEZE
-  struct __lightfs_dbc *cheeze_dbc;
-#endif
 };
+
+
+
 
 #endif
 

@@ -11,7 +11,7 @@ int lightfs_db_open (DB *db, DB_TXN *txn, const char *file, const char *database
 
 int lightfs_db_close (DB* db, uint32_t flag)
 {
-#if (defined EMULATION || defined CHEEZE)
+#ifdef EMULATION
 	db_close(db, flag);
 #endif
 	kfree(db);
@@ -47,6 +47,7 @@ int lightfs_db_update(DB *db, DB_TXN *txn, const DBT *key, const DBT *value, lof
 
 int lightfs_db_del (DB *db , DB_TXN *txn, DBT *key, enum lightfs_req_type type)
 {
+	ftfs_error(__func__, "\n");
 	return lightfs_bstore_txn_insert(db, txn, key, NULL, 0, type);
 }
 
@@ -97,7 +98,7 @@ int lightfs_db_create(DB **db, DB_ENV *env, uint32_t flags)
 	if (*db == NULL) {
 		return -ENOMEM;
 	}
-#if (defined EMULATION || defined CHEEZE)
+#ifdef EMULATION
 	db_create(db, env, flags);
 #endif
 	BUG_ON((*db)->i == NULL);

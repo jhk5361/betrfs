@@ -26,6 +26,7 @@
 #define DBC_LIMIT 1024
 #define ITER_BUF_SIZE LIGHTFS_IO_LARGE_BUF
 #define KMEM_CACHE_FLAG (SLAB_RECLAIM_ACCOUNT | SLAB_HWCACHE_ALIGN)
+#define TXN_FLUSH_TIME 500
 
 
 static inline void txn_hdlr_alloc(struct __lightfs_txn_hdlr **__txn_hdlr)

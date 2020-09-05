@@ -806,7 +806,7 @@ transfer:
 		
 wait_for_txn:
 		//wait_event_interruptible_timeout(txn_hdlr->wq, kthread_should_stop() || lightfs_txn_hdlr_check_state(), msecs_to_jiffies(5000));
-		ret = wait_event_interruptible_timeout(txn_hdlr->wq, kthread_should_stop() || lightfs_txn_hdlr_check_state(), msecs_to_jiffies(5000));
+		ret = wait_event_interruptible_timeout(txn_hdlr->wq, kthread_should_stop() || lightfs_txn_hdlr_check_state(), msecs_to_jiffies(TXN_FLUSH_TIME));
 		//ftfs_error(__func__, "핸들러 일어났다 %d\n", ret);
 
 		spin_lock(&txn_hdlr->txn_hdlr_spin);

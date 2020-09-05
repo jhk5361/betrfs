@@ -744,7 +744,7 @@ int ftfs_bstore_meta_readdir(DB *meta_db, DBT *meta_dbt, DB_TXN *txn,
 		type = ftfs_get_type(meta.u.st.st_mode);
 		//name = strrchr(ftfs_key_path(child_meta_key), '\x01') + 1;
 		name = ftfs_key_path(child_meta_key);
-		ftfs_error(__func__, "child_meta_key name:%s, len = %d\n", name, strlen(name));
+		//ftfs_error(__func__, "child_meta_key name:%s, len = %d\n", name, strlen(name));
 		if (!dir_emit(ctx, name, strlen(name), ino, type))
 			break;
 

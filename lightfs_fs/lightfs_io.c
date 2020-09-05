@@ -163,6 +163,7 @@ int lightfs_io_iter (DB *db, DBC *dbc, DB_TXN_BUF *txn_buf)
 	// cheeze iter
 	// need memcpy
 	// not found
+	// msleep_interruptible(20);
 	lightfs_io_set_cheeze_req(&req, buf_idx, buf, txn_buf->buf);
 	cheeze_io(&req);
 	//ftfs_error(__func__, "%s\n", txn_buf->buf);

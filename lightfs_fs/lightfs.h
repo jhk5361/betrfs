@@ -6,7 +6,7 @@
 #define LIGHTFS_TXN_LIMIT 384
 #define UINT16_MAX (65535U)
 #define LIGHTFS_IO_LARGE_BUF (2 * 1024 * 1024 + 200 * 1024)
-#define LIGHTFS_IO_SMALL_BUF (8 * 1024)
+#define LIGHTFS_IO_SMALL_BUF (4 * 1024)
 
 
 typedef struct __lightfs_db_io DB_IO;

@@ -702,6 +702,8 @@ int ftfs_bstore_meta_readdir(DB *meta_db, DBT *meta_dbt, DB_TXN *txn,
 	char indirect_meta_key[SIZEOF_CIRCLE_ROOT_META_KEY];
 	DBT indirect_meta_dbt;
 
+	ftfs_error(__func__, "ctx->pos = %d\n", ctx->pos);
+
 	if (ctx->pos == 2) {
 		child_meta_key = kmalloc(META_KEY_MAX_LEN, GFP_KERNEL);
 		if (child_meta_key == NULL)
@@ -734,6 +736,7 @@ int ftfs_bstore_meta_readdir(DB *meta_db, DBT *meta_dbt, DB_TXN *txn,
 			break;
 		}
 		if (meta.type == FTFS_METADATA_TYPE_REDIRECT) {
+			ftfs_error(__func__, "아니지???\n");
 			copy_meta_dbt_from_ino(&indirect_meta_dbt, meta.u.ino);
 			r = ftfs_bstore_meta_get(meta_db, &indirect_meta_dbt,
 			                         txn, &meta);

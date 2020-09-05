@@ -7,6 +7,14 @@
 
 int lightfs_io_create (DB_IO **db_io);
 
+static inline void lightfs_io_print (char *buf, int len)
+{
+	int i;
+	for (i = 0; i < len; i++) {
+		ftfs_error(__func__, "%d\n", buf[i]);
+	}
+}
+
 static inline int lightfs_io_set_txn_id(char *buf, uint32_t txn_id, int idx)
 {
 	*((uint32_t *)buf) = txn_id;
@@ -21,7 +29,7 @@ static inline int lightfs_io_set_cnt(char *buf, uint16_t cnt, int idx)
 
 static inline int lightfs_io_set_type(char *buf, uint8_t type, int idx)
 {
-	*buf = type;
+	*((uint8_t *)buf) = type;
 	//ftfs_error(__func__, "TYPE:%d\n", type);
 	return idx + sizeof(uint8_t);
 }
@@ -69,60 +77,73 @@ static inline int lightfs_io_set_buf_ptr(char *buf, char *buf_ptr, int idx)
 // DEL_MULTI: type, key_len, key, off (count of deleted key)
 static inline int lightfs_io_set_buf_set(char *buf, uint8_t type, uint16_t key_len, char *key, uint16_t off, uint16_t value_len, char *value, int idx)
 {
-	idx = lightfs_io_set_type(buf, type, idx);
-	idx = lightfs_io_set_key_len(buf, key_len, idx);
-	idx = lightfs_io_set_key(buf, key_len, key, idx);
-	idx = lightfs_io_set_off(buf, off, idx);
-	idx = lightfs_io_set_value_len(buf, value_len, idx);
-	idx = lightfs_io_set_value(buf, value_len, value, idx);
+	ftfs_error(__func__, "buf_idx = %d\n", idx);
+	lightfs_io_print(buf, 10);
+	idx = lightfs_io_set_type(buf + idx, type, idx);
+	ftfs_error(__func__, "buf_idx = %d\n", idx);
+	lightfs_io_print(buf, 10);
+	idx = lightfs_io_set_key_len(buf + idx, key_len, idx);
+	ftfs_error(__func__, "buf_idx = %d\n", idx);
+	lightfs_io_print(buf, 10);
+	idx = lightfs_io_set_key(buf + idx, key_len, key, idx);
+	ftfs_error(__func__, "buf_idx = %d\n", idx);
+	lightfs_io_print(buf, 10);
+	idx = lightfs_io_set_off(buf + idx, off, idx);
+	ftfs_error(__func__, "buf_idx = %d\n", idx);
+	lightfs_io_print(buf, 10);
+	idx = lightfs_io_set_value_len(buf + idx, value_len, idx);
+	ftfs_error(__func__, "buf_idx = %d\n", idx);
+	lightfs_io_print(buf, 10);
+	idx = lightfs_io_set_value(buf + idx, value_len, value, idx);
+
 	return idx;
 }
 
 static inline int lightfs_io_set_buf_update(char *buf, uint8_t type, uint16_t key_len, char *key, uint16_t off, uint16_t value_len, char *value, int idx)
 {
-	idx = lightfs_io_set_type(buf, type, idx);
-	idx = lightfs_io_set_key_len(buf, key_len, idx);
-	idx = lightfs_io_set_key(buf, key_len, key, idx);
-	idx = lightfs_io_set_off(buf, off, idx);
-	idx = lightfs_io_set_value_len(buf, value_len, idx);
-	idx = lightfs_io_set_value(buf, 4096, value, idx);
+	idx = lightfs_io_set_type(buf + idx, type, idx);
+	idx = lightfs_io_set_key_len(buf + idx, key_len, idx);
+	idx = lightfs_io_set_key(buf + idx, key_len, key, idx);
+	idx = lightfs_io_set_off(buf + idx, off, idx);
+	idx = lightfs_io_set_value_len(buf + idx, value_len, idx);
+	idx = lightfs_io_set_value(buf + idx, 4096, value, idx);
 	return idx;
 }
 
 
 static inline int lightfs_io_set_buf_del(char *buf, uint8_t type, uint16_t key_len, char *key, int idx)
 {
-	idx = lightfs_io_set_type(buf, type, idx);
-	idx = lightfs_io_set_key_len(buf, key_len, idx);
-	idx = lightfs_io_set_key(buf, key_len, key, idx);
+	idx = lightfs_io_set_type(buf + idx, type, idx);
+	idx = lightfs_io_set_key_len(buf + idx, key_len, idx);
+	idx = lightfs_io_set_key(buf + idx, key_len, key, idx);
 	return idx;
 }
 
 static inline int lightfs_io_set_buf_del_multi(char *buf, uint8_t type, uint16_t key_len, char *key, uint16_t off, int idx)
 {
-	idx = lightfs_io_set_type(buf, type, idx);
-	idx = lightfs_io_set_key_len(buf, key_len, idx);
-	idx = lightfs_io_set_key(buf, key_len, key, idx);
+	idx = lightfs_io_set_type(buf + idx, type, idx);
+	idx = lightfs_io_set_key_len(buf + idx, key_len, idx);
+	idx = lightfs_io_set_key(buf + idx, key_len, key, idx);
 	idx = lightfs_io_set_off(buf, off, idx);
 	return idx;
 }
 
 static inline int lightfs_io_set_buf_get(char *buf, uint8_t type, uint16_t key_len, char *key, uint16_t value_len, int idx)
 {
-	idx = lightfs_io_set_type(buf, type, idx);
-	idx = lightfs_io_set_key_len(buf, key_len, idx);
-	idx = lightfs_io_set_key(buf, key_len, key, idx);
-	idx = lightfs_io_set_value_len(buf, value_len, idx);
+	idx = lightfs_io_set_type(buf + idx, type, idx);
+	idx = lightfs_io_set_key_len(buf + idx, key_len, idx);
+	idx = lightfs_io_set_key(buf + idx, key_len, key, idx);
+	idx = lightfs_io_set_value_len(buf + idx, value_len, idx);
 	return idx;
 }
 
 static inline int lightfs_io_set_buf_iter(char *buf, uint8_t type, uint16_t key_len, char *key, uint16_t off, uint16_t value_len, int idx)
 {
-	idx = lightfs_io_set_type(buf, type, idx);
-	idx = lightfs_io_set_key_len(buf, key_len, idx);
-	idx = lightfs_io_set_key(buf, key_len, key, idx);
-	idx = lightfs_io_set_off(buf, off, idx);
-	idx = lightfs_io_set_value_len(buf, value_len, idx);
+	idx = lightfs_io_set_type(buf + idx, type, idx);
+	idx = lightfs_io_set_key_len(buf + idx, key_len, idx);
+	idx = lightfs_io_set_key(buf + idx, key_len, key, idx);
+	idx = lightfs_io_set_off(buf + idx, off, idx);
+	idx = lightfs_io_set_value_len(buf + idx, value_len, idx);
 	return idx;
 }
 

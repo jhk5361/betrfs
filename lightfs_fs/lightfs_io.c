@@ -100,15 +100,15 @@ int lightfs_io_get (DB *db, DB_TXN_BUF *txn_buf)
 
 	buf_idx = lightfs_io_set_txn_id(buf, txn_buf->txn_id, buf_idx);
 	buf_idx = lightfs_io_set_cnt(buf + buf_idx, 1, buf_idx);
-	buf_idx = lightfs_io_set_buf_get(buf + buf_idx, txn_buf->type, txn_buf->key_len, txn_buf->key, txn_buf->len, buf_idx);
+	buf_idx = lightfs_io_set_buf_get(buf, txn_buf->type, txn_buf->key_len, txn_buf->key, txn_buf->len, buf_idx);
 
 	// cb
 	// cheeze get
 	// need memcpy
 	// not found
+	ftfs_error(__func__, "%s\n", "왜???");
 	lightfs_io_set_cheeze_req(&req, buf_idx, buf, txn_buf->buf);
 	cheeze_io(&req);
-	//ftfs_error(__func__, "%s\n", txn_buf->buf);
 
 	if (req.ubuf_len == 0) {
 		txn_buf->ret = DB_NOTFOUND;
@@ -130,7 +130,7 @@ int lightfs_io_sync_put (DB *db, DB_TXN_BUF *txn_buf)
 
 	buf_idx = lightfs_io_set_txn_id(buf, txn_buf->txn_id, buf_idx);
 	buf_idx = lightfs_io_set_cnt(buf + buf_idx, 1, buf_idx);
-	buf_idx = lightfs_io_set_buf_set(buf + buf_idx, txn_buf->type, txn_buf->key_len, txn_buf->key, txn_buf->off, txn_buf->len, txn_buf->buf, buf_idx);
+	buf_idx = lightfs_io_set_buf_set(buf, txn_buf->type, txn_buf->key_len, txn_buf->key, txn_buf->off, txn_buf->len, txn_buf->buf, buf_idx);
 
 	// cb
 	// cheeze sync
@@ -157,16 +157,16 @@ int lightfs_io_iter (DB *db, DBC *dbc, DB_TXN_BUF *txn_buf)
 
 	buf_idx = lightfs_io_set_txn_id(buf, txn_buf->txn_id, buf_idx);
 	buf_idx = lightfs_io_set_cnt(buf + buf_idx, 1, buf_idx);
-	buf_idx = lightfs_io_set_buf_iter(buf + buf_idx, txn_buf->type, txn_buf->key_len, txn_buf->key, txn_buf->off, txn_buf->len, buf_idx);
+	buf_idx = lightfs_io_set_buf_iter(buf, txn_buf->type, txn_buf->key_len, txn_buf->key, txn_buf->off, txn_buf->len, buf_idx);
 
 	// cb
 	// cheeze iter
 	// need memcpy
 	// not found
 	// msleep_interruptible(20);
+	ftfs_error(__func__, "iter\n");
 	lightfs_io_set_cheeze_req(&req, buf_idx, buf, txn_buf->buf);
 	cheeze_io(&req);
-	//ftfs_error(__func__, "%s\n", txn_buf->buf);
 	
 	if (req.ubuf_len == 0) {
 		txn_buf->ret = DB_NOTFOUND;
@@ -191,31 +191,33 @@ int lightfs_io_transfer (DB *db, DB_C_TXN *c_txn)
 	buf = large_buf;
 
 	buf_idx = lightfs_io_set_txn_id(buf, c_txn->txn_id, buf_idx);
+	buf_idx += 2;
 	list_for_each_entry(txn, &c_txn->txn_list, txn_list) {
 		list_for_each_entry(txn_buf, &txn->txn_buf_list, txn_buf_list) {
+			ftfs_error(__func__, "buf_idx %d, type %d, key_len %d, key %s, off %d, len %d %d", buf_idx, txn_buf->type, txn_buf->key_len, txn_buf->key, txn_buf->off, txn_buf->len, sizeof(enum lightfs_req_type));
 			switch (txn_buf->type) {
 				case LIGHTFS_META_SET:
 				case LIGHTFS_DATA_SET:
 				case LIGHTFS_DATA_SEQ_SET:
-					buf_idx = lightfs_io_set_buf_set(buf + buf_idx, txn_buf->type, txn_buf->key_len, txn_buf->key, txn_buf->off, txn_buf->len, txn_buf->buf, buf_idx);
+					buf_idx = lightfs_io_set_buf_set(buf, (uint8_t)txn_buf->type, txn_buf->key_len, txn_buf->key, txn_buf->off, txn_buf->len, txn_buf->buf, buf_idx);
 					cnt++;
 					//db_put(txn_buf->db, NULL, &key, &value, 0);
 					break;
 				case LIGHTFS_META_DEL:
 				case LIGHTFS_DATA_DEL:
-					buf_idx = lightfs_io_set_buf_del(buf + buf_idx, txn_buf->type, txn_buf->key_len, txn_buf->key, buf_idx);
+					buf_idx = lightfs_io_set_buf_del(buf, txn_buf->type, txn_buf->key_len, txn_buf->key, buf_idx);
 					cnt++;
 					//db_del(txn_buf->db, NULL, &key, 0);
 					break;
 				case LIGHTFS_META_UPDATE:
 				case LIGHTFS_DATA_UPDATE:
-					buf_idx = lightfs_io_set_buf_update(buf + buf_idx, txn_buf->type, txn_buf->key_len, txn_buf->key, txn_buf->off, txn_buf->update, txn_buf->buf, buf_idx);
+					buf_idx = lightfs_io_set_buf_update(buf, txn_buf->type, txn_buf->key_len, txn_buf->key, txn_buf->off, txn_buf->update, txn_buf->buf, buf_idx);
 					cnt++;
 					//value.ulen = txn_buf->update;
 					//db_update(txn_buf->db, NULL, &key, &value, txn_buf->off, 0);
 					break;
 				case LIGHTFS_DATA_DEL_MULTI:
-					buf_idx = lightfs_io_set_buf_del_multi(buf + buf_idx, txn_buf->type, txn_buf->key_len, txn_buf->key, txn_buf->off, buf_idx);
+					buf_idx = lightfs_io_set_buf_del_multi(buf, txn_buf->type, txn_buf->key_len, txn_buf->key, txn_buf->off, buf_idx);
 					//offset = key_cnt;
 					cnt++;
 					break;
@@ -225,7 +227,7 @@ int lightfs_io_transfer (DB *db, DB_C_TXN *c_txn)
 			}
 		}
 	}
-	buf_idx = lightfs_io_set_cnt(buf + sizeof(uint32_t), cnt, buf_idx); // trickty..
+	lightfs_io_set_cnt(buf + sizeof(uint32_t), cnt, 0); // trickty..
 
 	//cheeze_write
 	lightfs_io_set_cheeze_req(&req, buf_idx, buf, NULL);

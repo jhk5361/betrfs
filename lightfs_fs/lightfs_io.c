@@ -169,6 +169,8 @@ int lightfs_io_iter (DB *db, DBC *dbc, DB_TXN_BUF *txn_buf)
 	
 	if (req.ubuf_len == 0) {
 		txn_buf->ret = DB_NOTFOUND;
+	} else {
+		txn_buf->ret = req.ubuf_len;
 	}
 
 	kmem_cache_free(lightfs_io_small_buf_cachep, buf);
@@ -254,6 +256,7 @@ int lightfs_io_commit (DB_TXN_BUF *txn_buf)
 	// cheeze sync
 	//ftfs_error(__func__, "보낸다\n");
 	lightfs_io_set_cheeze_req(&req, buf_idx, buf, buf); // last 'buf' is tricky
+	//lightfs_io_set_cheeze_req(&req, buf_idx, buf, NULL); // last 'buf' is tricky
 	cheeze_io(&req);
 	//ftfs_error(__func__, "%s\n", buf);
 

@@ -128,12 +128,12 @@ static inline void copy_txn_buf_key_from_dbt(DB_TXN_BUF *txn_buf, DBT *dbt)
 
 static inline uint32_t copy_dbt_from_dbc(DBC *dbc, DBT *dbt)
 {
-	dbt->size = *((uint32_t *)(dbc->buf + dbc->idx));
+	dbt->size = *((uint16_t *)(dbc->buf + dbc->idx));
 	if (dbt->size) {
-		memcpy(dbt->data, dbc->buf + dbc->idx + sizeof(uint32_t), dbt->size);
+		memcpy(dbt->data, dbc->buf + dbc->idx + sizeof(uint16_t), dbt->size);
 	}
 	
-	return sizeof(uint32_t) + dbt->size;
+	return sizeof(uint16_t) + dbt->size;
 }
 
 //int lightfs_bstore_txn_begin(DB_TXN *, DB_TXN **, uint32_t);

@@ -547,6 +547,7 @@ enum lightfs_req_type {
 	LIGHTFS_DATA_UPDATE,
 	LIGHTFS_DATA_RENAME,
 	LIGHTFS_COMMIT,
+	LIGHTFS_GET_MULTI,
 };
 
 struct __lightfs_db_env {

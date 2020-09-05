@@ -362,7 +362,7 @@ int lightfs_bstore_dbc_cursor(DB *db, DB_TXN *txn, DBC **dbc, enum lightfs_req_t
 	//lightfs_completion_init(txn_buf->completionp);
 	//txn_buf->txn_buf_cb = lightfs_bstore_dbc_cb;
 
-	txn_buf_setup(txn_buf, cursor->buf, 0, ITER_BUF_SIZE, type);
+	txn_buf_setup(txn_buf, cursor->buf, 0, 0, type);
 	cursor->extra = (void *)txn_buf;
 	cursor->c_get = lightfs_bstore_dbc_c_get;
 	cursor->c_getf_set_range = lightfs_bstore_dbc_c_getf_set_range;

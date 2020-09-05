@@ -702,7 +702,7 @@ int ftfs_bstore_meta_readdir(DB *meta_db, DBT *meta_dbt, DB_TXN *txn,
 	char indirect_meta_key[SIZEOF_CIRCLE_ROOT_META_KEY];
 	DBT indirect_meta_dbt;
 
-	ftfs_error(__func__, "ctx->pos = %d\n", ctx->pos);
+	//ftfs_error(__func__, "ctx->pos = %d\n", ctx->pos);
 
 	if (ctx->pos == 2) {
 		child_meta_key = kmalloc(META_KEY_MAX_LEN, GFP_KERNEL);

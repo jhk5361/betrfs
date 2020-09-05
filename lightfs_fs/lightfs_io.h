@@ -77,23 +77,11 @@ static inline int lightfs_io_set_buf_ptr(char *buf, char *buf_ptr, int idx)
 // DEL_MULTI: type, key_len, key, off (count of deleted key)
 static inline int lightfs_io_set_buf_set(char *buf, uint8_t type, uint16_t key_len, char *key, uint16_t off, uint16_t value_len, char *value, int idx)
 {
-	ftfs_error(__func__, "buf_idx = %d\n", idx);
-	lightfs_io_print(buf, 10);
 	idx = lightfs_io_set_type(buf + idx, type, idx);
-	ftfs_error(__func__, "buf_idx = %d\n", idx);
-	lightfs_io_print(buf, 10);
 	idx = lightfs_io_set_key_len(buf + idx, key_len, idx);
-	ftfs_error(__func__, "buf_idx = %d\n", idx);
-	lightfs_io_print(buf, 10);
 	idx = lightfs_io_set_key(buf + idx, key_len, key, idx);
-	ftfs_error(__func__, "buf_idx = %d\n", idx);
-	lightfs_io_print(buf, 10);
 	idx = lightfs_io_set_off(buf + idx, off, idx);
-	ftfs_error(__func__, "buf_idx = %d\n", idx);
-	lightfs_io_print(buf, 10);
 	idx = lightfs_io_set_value_len(buf + idx, value_len, idx);
-	ftfs_error(__func__, "buf_idx = %d\n", idx);
-	lightfs_io_print(buf, 10);
 	idx = lightfs_io_set_value(buf + idx, value_len, value, idx);
 
 	return idx;

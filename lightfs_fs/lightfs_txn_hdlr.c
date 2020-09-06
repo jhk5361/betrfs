@@ -816,6 +816,8 @@ txn_repeat:
 //			if (txn_hdlr->running_c_txn_id == 0) {
 //				txn_hdlr->running_c_txn_id = txn->txn_id;
 //			}
+			if (txn_hdlr->running_c_txn_id == 0)
+				txn_hdlr->running_c_txn_id = txn->txn_id;
 			c_txn->txn_id = txn_hdlr->running_c_txn_id;
 			lightfs_c_txn_insert(c_txn, txn);
 			txn_hdlr->running_c_txn_cnt++;
@@ -823,8 +825,8 @@ txn_repeat:
 			if (txn_hdlr->running_c_txn_cnt >= RUNNING_C_TXN_LIMIT) {
 				//ftfs_error(__func__, "TXN_FLUSH: %d\n", txn_hdlr->running_c_txn_cnt);
 				c_txn->state = TXN_FLUSH;
-//				txn_hdlr->running_c_txn_id = 0;
-				txn_hdlr->running_c_txn_id++;
+				txn_hdlr->running_c_txn_id = 0;
+				//txn_hdlr->running_c_txn_id++;
 			}
 		}
 		//spin_unlock(&txn_hdlr->running_c_txn_spin);
@@ -837,8 +839,8 @@ transfer:
 			if (!(c_txn->state & TXN_TRANSFERING)) {
 				ftfs_error(__func__, "별로 없나부네 먼저 보낸다.\n");
 				c_txn->state = TXN_FLUSH;
-				//txn_hdlr->running_c_txn_id = 0;
-				txn_hdlr->running_c_txn_id++;
+				txn_hdlr->running_c_txn_id = 0;
+				//txn_hdlr->running_c_txn_id++;
 				lightfs_c_txn_transfer(c_txn);
 				if (c_txn == txn_hdlr->running_c_txn) {
 					txn_hdlr->running_c_txn = NULL;

@@ -86,7 +86,7 @@ static inline void lightfs_dbc_init(void *dbc)
 {
 	DBC *cursor = dbc;
 	//cursor->buf = (char *)kvmalloc(ITER_BUF_SIZE, GFP_KERNEL);
-	cursor->buf = kmem_cache_alloc(lightfs_dbc_buf_cachep, GFP_ATOMIC);
+	cursor->buf = kmem_cache_alloc(lightfs_dbc_buf_cachep, GFP_KERNEL);
 	cursor->buf_len = 0;
 	cursor->idx = 0;
 	//TODO: init_completion((struct completion *)completionp);
@@ -186,36 +186,45 @@ int lightfs_bstore_txn_get(DB *db, DB_TXN *txn, DBT *key, DBT *value, uint32_t o
 	return ret;
 }
 
-int lightfs_bstore_txn_get_multi(DB *db, DB_TXN *txn, DBT *key, uint16_t cnt, enum lightfs_req_type type)
+int lightfs_bstore_txn_get_multi(DB *db, DB_TXN *txn, DBT *key, uint32_t cnt, YDB_CALLBACK_FUNCTION f, void *extra, enum lightfs_req_type type)
 {
 	DB_TXN_BUF *txn_buf;
 	int ret = 0;
 	char *buf;
+	char *meta_key = key->data;
+	DBT value;
+	int i;
+	uint64_t block_num = ftfs_data_key_get_blocknum(meta_key, key->size);
 
 	txn_buf = kmem_cache_alloc(lightfs_txn_buf_cachep, GFP_KERNEL);
 	lightfs_txn_buf_init(txn_buf);
 	txn_buf->txn_id = txn->txn_id;
 	txn_buf->db = db;
-	buf = kmem_cache_alloc(lightfs_dbc_buf_cachep, GFP_ATOMIC);
-	//txn_buf->completionp = kmem_cache_alloc(lightfs_completion_cachep, GFP_KERNEL);
-	//lightfs_completion_init(txn_buf->completionp);
-	txn_buf_setup(txn_buf, txn_buf, cnt, cnt, type);
+	buf = kmem_cache_alloc(lightfs_dbc_buf_cachep, GFP_KERNEL);
+	txn_buf_setup(txn_buf, buf, 0, cnt, type);
 	alloc_txn_buf_key_from_dbt(txn_buf, key);
 
-	//txn_buf->txn_buf_cb = lightfs_bstore_txn_get_cb;
-	txn_hdlr->db_io->get(db, txn_buf);
-	//lightfs_io_read(txn_buf);
+	txn_hdlr->db_io->get_multi(db, txn_buf);
 	
-	//wait_for_completion(txn_buf->completionp);
-	//lightfs_completion_free(txn_buf->completionp);
-	txn_buf->buf = NULL;
+//	if (txn_buf->ret == DB_NOTFOUND) {
+//		ret = DB_NOTFOUND;
+//		goto free_out;
+//	}
 
 
-	if (txn_buf->ret == DB_NOTFOUND) {
-		ret = DB_NOTFOUND;
-	} else {
-		//value->size = txn_buf->ret;
+	//dbt_alloc(&value, PAGE_SIZE);
+	//value.size = PAGE_SIZE;
+
+	for (i = 0; i < cnt; i++) {
+		ftfs_data_key_set_blocknum(meta_key, key->size, block_num++);
+		//memcpy(value.data, buf + (i * PAGE_SIZE), PAGE_SIZE);
+		dbt_setup(&value, buf + (i * PAGE_SIZE), PAGE_SIZE);
+		f(key, &value, extra);
 	}
+	//dbt_destroy(&value);
+	
+free_out:
+	txn_buf->buf = NULL;
 
 	kmem_cache_free(lightfs_dbc_buf_cachep, buf);
 	lightfs_txn_buf_free(txn_buf);

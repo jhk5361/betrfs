@@ -144,6 +144,7 @@ int lightfs_txn_hdlr_init(void);
 int lightfs_txn_hdlr_destroy(void);
 int lightfs_bstore_txn_insert(DB *, DB_TXN *, DBT *, DBT *, uint32_t, enum lightfs_req_type);
 int lightfs_bstore_txn_get(DB *, DB_TXN *, DBT *, DBT *, uint32_t, enum lightfs_req_type);
+int lightfs_bstore_txn_get_multi(DB *, DB_TXN *, DBT *, uint32_t, YDB_CALLBACK_FUNCTION, void *, enum lightfs_req_type);
 int lightfs_bstore_txn_sync_put(DB *, DB_TXN *, DBT *, DBT *, uint32_t, enum lightfs_req_type);
 int lightfs_bstore_dbc_cursor(DB *, DB_TXN *, DBC **, enum lightfs_req_type);
 

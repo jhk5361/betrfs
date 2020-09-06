@@ -57,6 +57,7 @@ struct __lightfs_db_io {
 	int (*transfer) (DB *db, DB_C_TXN *c_txn);
 	int (*commit) (DB_TXN_BUF *txn_buf);
 	int (*close) (DB_IO *db_io);
+	int (*get_multi) (DB *db, DB_TXN_BUF *txn_buf);
 };
 
 struct __lightfs_txn_hdlr {

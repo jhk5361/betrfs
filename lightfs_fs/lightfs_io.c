@@ -83,6 +83,27 @@ int rb_io_commit (DB_TXN_BUF *txn_buf)
 	return 0;
 }
 
+int rb_io_get_multi (DB *db, DB_TXN_BUF *txn_buf)
+{
+	DBT key, value;
+	int i;
+	char *meta_key = txn_buf->key;
+	uint64_t block_num = ftfs_data_key_get_blocknum(meta_key, txn_buf->key_len);
+
+	dbt_setup(&key, txn_buf->key, txn_buf->key_len);
+	for (i = 0; i < txn_buf->len; i++) {
+		ftfs_data_key_set_blocknum(meta_key, key.size, block_num++);
+		dbt_setup(&value, txn_buf->buf + (i * PAGE_SIZE), PAGE_SIZE);
+		txn_buf->ret = db_get(txn_buf->db, NULL, &key, &value, 0);
+		if (txn_buf->ret == DB_NOTFOUND) {
+			memset(value.data, 0, PAGE_SIZE);
+		}
+	}
+	txn_buf->ret = 0;
+
+	return 0;
+}
+
 int rb_io_close (DB_IO *db_io)
 {
 	kfree(db_io);
@@ -111,6 +132,8 @@ int lightfs_io_get (DB *db, DB_TXN_BUF *txn_buf)
 
 	if (req.ubuf_len == 0) {
 		txn_buf->ret = DB_NOTFOUND;
+	} else {
+		txn_buf->ret = req.ubuf_len;
 	}
 
 	kmem_cache_free(lightfs_io_small_buf_cachep, buf);
@@ -265,6 +288,37 @@ int lightfs_io_commit (DB_TXN_BUF *txn_buf)
 	return 0;
 }
 
+int lightfs_io_get_multi (DB *db, DB_TXN_BUF *txn_buf)
+{
+	int buf_idx = 0;
+	char *buf = kmem_cache_alloc(lightfs_io_small_buf_cachep, GFP_KERNEL);
+	struct cheeze_req_user req;
+
+	buf_idx = lightfs_io_set_txn_id(buf, txn_buf->txn_id, buf_idx);
+	buf_idx = lightfs_io_set_cnt(buf + buf_idx, txn_buf->len, buf_idx);
+	buf_idx = lightfs_io_set_buf_get_multi(buf, txn_buf->type, txn_buf->key_len, txn_buf->key, buf_idx);
+
+	// cb
+	// cheeze get
+	// need memcpy
+	// not found
+	lightfs_io_set_cheeze_req(&req, buf_idx, buf, txn_buf->buf, 0);
+	cheeze_io(&req);
+
+	if (req.ubuf_len == 0) {
+		txn_buf->ret = DB_NOTFOUND;
+	} else {
+		txn_buf->ret = req.ubuf_len;
+	}
+
+	kmem_cache_free(lightfs_io_small_buf_cachep, buf);
+
+#ifdef CHEEZE
+	return rb_io_get_multi(db, txn_buf);
+#endif
+	return 0;
+}
+
 int lightfs_io_close (DB_IO *db_io)
 {
 	cheeze_exit();
@@ -305,6 +359,7 @@ int lightfs_io_create (DB_IO **db_io) {
 	(*db_io)->transfer = rb_io_transfer;
 	(*db_io)->commit = rb_io_commit;
 	(*db_io)->close = rb_io_close;
+	(*db_io)->get_multi = rb_io_get_multi;
 #else
 	(*db_io)->get = lightfs_io_get;
 	(*db_io)->sync_put = lightfs_io_sync_put;
@@ -312,6 +367,7 @@ int lightfs_io_create (DB_IO **db_io) {
 	(*db_io)->transfer = lightfs_io_transfer;
 	(*db_io)->commit = lightfs_io_commit;
 	(*db_io)->close = lightfs_io_close;
+	(*db_io)->get_multi = lightfs_io_get_multi;
 #endif
 
 	ftfs_error(__func__, "cheeze_init %d\n", cheeze_init());

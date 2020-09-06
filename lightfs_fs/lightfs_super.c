@@ -606,7 +606,7 @@ static int ftfs_readpages(struct file *filp, struct address_space *mapping,
 	if (!ftio)
 		return -ENOMEM;
 	ftio_setup(ftio, pages, nr_pages, mapping);
-	ftfs_error(__func__, "%d\n", nr_pages);
+	//ftfs_error(__func__, "%d\n", nr_pages);
 
 	meta_dbt = ftfs_get_read_lock(ftfs_inode);
 

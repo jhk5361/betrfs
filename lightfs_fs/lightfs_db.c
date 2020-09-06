@@ -67,6 +67,13 @@ int lightfs_db_del_multi (DB *db, DB_TXN *txn, DBT *min_key, DBT *max_key, bool 
 }
 #endif
 
+#ifdef GET_MULTI
+int lightfs_db_get_multi (DB *db, DB_TXN *txn, DBT *key, uint32_t cnt, YDB_CALLBACK_FUNCTION f, void *extra, enum lightfs_req_type type)
+{
+	return lightfs_bstore_txn_get_multi(db, txn, key, cnt, f, extra, type);
+}
+#endif
+
 int lightfs_db_cursor (DB *db, DB_TXN *txn, DBC **dbc, enum lightfs_req_type type)
 {
 #ifdef EMULATION
@@ -116,6 +123,9 @@ int lightfs_db_create(DB **db, DB_ENV *env, uint32_t flags)
 	(*db)->rename = lightfs_db_rename;
 	(*db)->hot_optimize = lightfs_db_hot_optimize;
 	(*db)->change_descriptor = lightfs_db_change_descriptor;
+#ifdef GET_MULTI
+	(*db)->get_multi = lightfs_db_get_multi;
+#endif
 
 	return 0;
 }

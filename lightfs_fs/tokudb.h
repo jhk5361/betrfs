@@ -683,6 +683,9 @@ struct __lightfs_db {
 #else
   int (*del_multi) (DB *, DB_TXN *, DBT *, DBT *, bool, enum lightfs_req_type);
 #endif
+#ifdef GET_MULTI
+  int (*get_multi) (DB *, DB_TXN *, DBT *, uint32_t, YDB_CALLBACK_FUNCTION, void *, enum lightfs_req_type);
+#endif
   int (*fd) (DB *, int *);
   int (*get) (DB *, DB_TXN *, DBT *, DBT *, enum lightfs_req_type);
   int (*get_flags) (DB *, uint32_t *);

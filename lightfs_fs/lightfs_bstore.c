@@ -993,7 +993,7 @@ static inline void ftfs_bstore_fill_rest_page(struct ftio *ftio)
 
 int ftfs_bstore_scan_pages(DB *data_db, DBT *meta_dbt, DB_TXN *txn, struct ftio *ftio, struct inode *inode)
 {
-	int ret, r;
+	int ret, r = 0;
 	struct ftfs_scan_pages_cb_info info;
 	DBT data_dbt;
 	DBC *cursor;
@@ -1018,6 +1018,21 @@ int ftfs_bstore_scan_pages(DB *data_db, DBT *meta_dbt, DB_TXN *txn, struct ftio 
 	if (ret)
 		return ret;
 
+#ifdef GET_MULTI
+	info.meta_key = meta_dbt->data;
+	info.ftio = ftio;
+	info.inode = inode;
+	info.block_cnt = block_cnt;
+
+	while (info.do_continue && !r)
+		r = data_db->get_multi(data_db, txn, &data_dbt, ftio->ft_vcnt - ftio->ft_bvidx, ftfs_scan_pages_cb, &info, LIGHTFS_GET_MULTI);
+	if (r && r != DB_NOTFOUND)
+		ret = r;
+	if (!ret)
+		ftfs_bstore_fill_rest_page(ftio);
+
+	BUG_ON(r);
+#else
 	if (block_cnt == 1) {
 		buf = kmap(page);
 		ret = ftfs_bstore_get(data_db, &data_dbt, txn, buf, inode);
@@ -1055,9 +1070,10 @@ int ftfs_bstore_scan_pages(DB *data_db, DBT *meta_dbt, DB_TXN *txn, struct ftio 
 		r = cursor->c_close(cursor);
 		BUG_ON(r);
 	}
+#endif
 
 
-	free_out:
+free_out:
 	dbt_destroy(&data_dbt);
 
 	return ret;

@@ -106,7 +106,7 @@ int lightfs_io_get (DB *db, DB_TXN_BUF *txn_buf)
 	// cheeze get
 	// need memcpy
 	// not found
-	lightfs_io_set_cheeze_req(&req, buf_idx, buf, txn_buf->buf);
+	lightfs_io_set_cheeze_req(&req, buf_idx, buf, txn_buf->buf, txn_buf->len);
 	cheeze_io(&req);
 
 	if (req.ubuf_len == 0) {
@@ -134,7 +134,7 @@ int lightfs_io_sync_put (DB *db, DB_TXN_BUF *txn_buf)
 	// cb
 	// cheeze sync
 	//lightfs_io_set_cheeze_req(&req, buf_idx, buf, txn_buf->buf);
-	lightfs_io_set_cheeze_req(&req, buf_idx, buf, NULL);
+	lightfs_io_set_cheeze_req(&req, buf_idx, buf, NULL, 0);
 	cheeze_io(&req);
 
 	kmem_cache_free(lightfs_io_small_buf_cachep, buf);
@@ -164,7 +164,7 @@ int lightfs_io_iter (DB *db, DBC *dbc, DB_TXN_BUF *txn_buf)
 	// not found
 	// msleep_interruptible(20);
 	//ftfs_error(__func__, "iter\n");
-	lightfs_io_set_cheeze_req(&req, buf_idx, buf, txn_buf->buf);
+	lightfs_io_set_cheeze_req(&req, buf_idx, buf, txn_buf->buf, 0);
 	cheeze_io(&req);
 	
 	if (req.ubuf_len == 0) {
@@ -231,7 +231,7 @@ int lightfs_io_transfer (DB *db, DB_C_TXN *c_txn)
 	lightfs_io_set_cnt(buf + sizeof(uint32_t), cnt, 0); // trickty..
 
 	//cheeze_write
-	lightfs_io_set_cheeze_req(&req, buf_idx, buf, NULL);
+	lightfs_io_set_cheeze_req(&req, buf_idx, buf, NULL, 0);
 	cheeze_io(&req);
 
 	//kmem_cache_free(lightfs_io_large_buf_cachep, buf);
@@ -255,8 +255,8 @@ int lightfs_io_commit (DB_TXN_BUF *txn_buf)
 	// cb
 	// cheeze sync
 	//ftfs_error(__func__, "보낸다\n");
-	lightfs_io_set_cheeze_req(&req, buf_idx, buf, buf); // last 'buf' is tricky
-	//lightfs_io_set_cheeze_req(&req, buf_idx, buf, NULL); // last 'buf' is tricky
+	lightfs_io_set_cheeze_req(&req, buf_idx, buf, buf, 0); // last 'buf' is tricky
+	//lightfs_io_set_cheeze_req(&req, buf_idx, buf, NULL, 0); // last 'buf' is tricky
 	cheeze_io(&req);
 	//ftfs_error(__func__, "%s\n", buf);
 

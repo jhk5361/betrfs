@@ -135,11 +135,12 @@ static inline int lightfs_io_set_buf_iter(char *buf, uint8_t type, uint16_t key_
 	return idx;
 }
 
-static inline void lightfs_io_set_cheeze_req(struct cheeze_req_user *req, int buf_len, char *buf, char *ret_buf)
+static inline void lightfs_io_set_cheeze_req(struct cheeze_req_user *req, int buf_len, char *buf, char *ret_buf, int ubuf_len)
 {
 	req->buf_len = buf_len;
 	req->buf = buf;
 	req->ret_buf = ret_buf;
+	req->ubuf_len = ubuf_len;
 }
 
 

@@ -85,8 +85,8 @@ static inline void lightfs_completion_free(struct completion *completionp)
 static inline void lightfs_dbc_init(void *dbc)
 {
 	DBC *cursor = dbc;
-	cursor->buf = (char *)kvmalloc(ITER_BUF_SIZE, GFP_KERNEL);
-	//cursor->buf = kmem_cache_alloc(lightfs_dbc_buf_cachep, GFP_ATOMIC);
+	//cursor->buf = (char *)kvmalloc(ITER_BUF_SIZE, GFP_KERNEL);
+	cursor->buf = kmem_cache_alloc(lightfs_dbc_buf_cachep, GFP_ATOMIC);
 	cursor->buf_len = 0;
 	cursor->idx = 0;
 	//TODO: init_completion((struct completion *)completionp);
@@ -94,8 +94,8 @@ static inline void lightfs_dbc_init(void *dbc)
 
 static inline void lightfs_dbc_free(DBC *dbc)
 {
-	kvfree(dbc->buf);
-	//kmem_cache_free(lightfs_dbc_buf_cachep, dbc->buf);
+	//kvfree(dbc->buf);
+	kmem_cache_free(lightfs_dbc_buf_cachep, dbc->buf);
 	kmem_cache_free(lightfs_dbc_cachep, dbc);	
 }
 
@@ -181,6 +181,43 @@ int lightfs_bstore_txn_get(DB *db, DB_TXN *txn, DBT *key, DBT *value, uint32_t o
 		//value->size = txn_buf->ret;
 	}
 
+	lightfs_txn_buf_free(txn_buf);
+
+	return ret;
+}
+
+int lightfs_bstore_txn_get_multi(DB *db, DB_TXN *txn, DBT *key, uint16_t cnt, enum lightfs_req_type type)
+{
+	DB_TXN_BUF *txn_buf;
+	int ret = 0;
+	char *buf;
+
+	txn_buf = kmem_cache_alloc(lightfs_txn_buf_cachep, GFP_KERNEL);
+	lightfs_txn_buf_init(txn_buf);
+	txn_buf->txn_id = txn->txn_id;
+	txn_buf->db = db;
+	buf = kmem_cache_alloc(lightfs_dbc_buf_cachep, GFP_ATOMIC);
+	//txn_buf->completionp = kmem_cache_alloc(lightfs_completion_cachep, GFP_KERNEL);
+	//lightfs_completion_init(txn_buf->completionp);
+	txn_buf_setup(txn_buf, txn_buf, cnt, cnt, type);
+	alloc_txn_buf_key_from_dbt(txn_buf, key);
+
+	//txn_buf->txn_buf_cb = lightfs_bstore_txn_get_cb;
+	txn_hdlr->db_io->get(db, txn_buf);
+	//lightfs_io_read(txn_buf);
+	
+	//wait_for_completion(txn_buf->completionp);
+	//lightfs_completion_free(txn_buf->completionp);
+	txn_buf->buf = NULL;
+
+
+	if (txn_buf->ret == DB_NOTFOUND) {
+		ret = DB_NOTFOUND;
+	} else {
+		//value->size = txn_buf->ret;
+	}
+
+	kmem_cache_free(lightfs_dbc_buf_cachep, buf);
 	lightfs_txn_buf_free(txn_buf);
 
 	return ret;

@@ -276,8 +276,10 @@ void *lightfs_bstore_dbc_cb(void *completionp)
 int lightfs_bstore_dbc_c_get(DBC *dbc, DBT *key, DBT *value, uint32_t flags)
 {
 	uint32_t idx = 0;
-	uint16_t is_eof;
+	uint16_t size;
 	DB_TXN_BUF *txn_buf = (DB_TXN_BUF *)dbc->extra;
+	//print_key(__func__, key->data, key->size);
+	//ftfs_error(__func__, "key_size: %d, dbc->idx: %d, dbc->buf_len %d eof: %d\n", key->size, dbc->idx, dbc->buf_len, sizeof(is_eof));
 	//ftfs_error(__func__, "buf_len: %d, buf_idx: %d\n", dbc->buf_len, dbc->idx);
 	if (dbc->idx >= dbc->buf_len) {
 		if (flags == DB_SET_RANGE) {
@@ -301,16 +303,17 @@ int lightfs_bstore_dbc_c_get(DBC *dbc, DBT *key, DBT *value, uint32_t flags)
 		}
 	}
 	//TODO end-of-iter
-	if (is_eof = dbc_is_eof(dbc)) {
-		dbc->idx += sizeof(is_eof);
+	size = dbc_get_size(dbc);
+	if (size == 0) {
+		dbc->idx += sizeof(size);
 		return DB_NOTFOUND;
+	} else if (size == 1) {
+		dbc->idx += sizeof(size);
 	} else {
-		idx = copy_dbt_from_dbc(dbc, key);
-		//print_key(__func__, key->data, key->size);
-		dbc->idx += idx;
+		dbc->idx += copy_dbt_from_dbc(dbc, key);
 		dbc->idx += copy_value_dbt_from_dbc(dbc, value);
 	}
-	
+
 	return 0;
 }
 

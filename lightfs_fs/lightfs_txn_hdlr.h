@@ -147,9 +147,9 @@ static inline uint32_t copy_value_dbt_from_dbc(DBC *dbc, DBT *dbt)
 	return sizeof(uint16_t) + size;
 }
 
-static inline bool dbc_is_eof(DBC *dbc)
+static inline uint16_t dbc_get_size(DBC *dbc)
 {
-	return !(*((uint16_t *)(dbc->buf + dbc->idx)));
+	return *((uint16_t *)(dbc->buf + dbc->idx));
 }
 
 

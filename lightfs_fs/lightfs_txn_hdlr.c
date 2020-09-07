@@ -276,6 +276,7 @@ void *lightfs_bstore_dbc_cb(void *completionp)
 int lightfs_bstore_dbc_c_get(DBC *dbc, DBT *key, DBT *value, uint32_t flags)
 {
 	uint32_t idx = 0;
+	uint16_t is_eof;
 	DB_TXN_BUF *txn_buf = (DB_TXN_BUF *)dbc->extra;
 	//ftfs_error(__func__, "buf_len: %d, buf_idx: %d\n", dbc->buf_len, dbc->idx);
 	if (dbc->idx >= dbc->buf_len) {
@@ -300,14 +301,16 @@ int lightfs_bstore_dbc_c_get(DBC *dbc, DBT *key, DBT *value, uint32_t flags)
 		}
 	}
 	//TODO end-of-iter
-	idx = copy_dbt_from_dbc(dbc, key);
-	//print_key(__func__, key->data, key->size);
-	if (idx == 2) {
+	if (is_eof = dbc_is_eof(dbc)) {
+		dbc->idx += sizeof(is_eof);
 		return DB_NOTFOUND;
+	} else {
+		idx = copy_dbt_from_dbc(dbc, key);
+		//print_key(__func__, key->data, key->size);
+		dbc->idx += idx;
+		dbc->idx += copy_value_dbt_from_dbc(dbc, value);
 	}
-	dbc->idx += idx;
-	dbc->idx += copy_value_dbt_from_dbc(dbc, value);
-
+	
 	return 0;
 }
 

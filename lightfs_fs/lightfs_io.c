@@ -191,7 +191,7 @@ int lightfs_io_iter (DB *db, DBC *dbc, DB_TXN_BUF *txn_buf)
 	cheeze_io(&req);
 	
 	//ftfs_error(__func__, "buf: %px\n len: %d\n, ubuf: %px\n, ubuf_len: %d\n", req.buf, req.buf_len, req.ubuf, req.ubuf_len);
-	if (req.ubuf_len == 2) {
+	if (req.ubuf_len == 0) {
 		//ftfs_error(__func__, "NOTFOUND\n");
 		txn_buf->ret = DB_NOTFOUND;
 	} else {

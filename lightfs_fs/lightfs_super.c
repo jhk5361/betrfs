@@ -1314,7 +1314,7 @@ static int ftfs_readdir(struct file *file, struct dir_context *ctx)
 	if (ctx->pos == 3)
 		return 0;
 
-	if (ctx->pos == 0) {
+	if (ctx->pos < 2) {
 		if (!dir_emit_dots(file, ctx))
 			return -ENOMEM;
 		ctx->pos = 2;
@@ -1666,6 +1666,7 @@ out:
 		ftfs_put_read_lock(FTFS_I(inode));
 		ftfs_put_read_lock(FTFS_I(dir));
 	}
+
 
 	if (ret)
 		return ret;

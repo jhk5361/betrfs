@@ -137,6 +137,17 @@ static inline uint32_t copy_dbt_from_dbc(DBC *dbc, DBT *dbt)
 	return sizeof(uint16_t) + dbt->size;
 }
 
+static inline uint32_t copy_value_dbt_from_dbc(DBC *dbc, DBT *dbt)
+{
+	uint16_t size = *((uint16_t *)(dbc->buf + dbc->idx));
+	if (dbt->size) {
+		memcpy(dbt->data, dbc->buf + dbc->idx + sizeof(uint16_t), dbt->size);
+	}
+	
+	return sizeof(uint16_t) + size;
+}
+
+
 //int lightfs_bstore_txn_begin(DB_TXN *, DB_TXN **, uint32_t);
 //int lightfs_bstore_txn_commit(DB_TXN *, uint32_t);
 //int lightfs_bstore_txn_abort(DB_TXN *);

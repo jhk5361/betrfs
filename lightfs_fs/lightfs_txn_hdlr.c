@@ -302,7 +302,7 @@ int lightfs_bstore_dbc_c_get(DBC *dbc, DBT *key, DBT *value, uint32_t flags)
 		return DB_NOTFOUND;
 	}
 	dbc->idx += idx;
-	dbc->idx += copy_dbt_from_dbc(dbc, value);
+	dbc->idx += copy_value_dbt_from_dbc(dbc, value);
 
 	return 0;
 }
@@ -333,7 +333,7 @@ int lightfs_bstore_dbc_c_getf_set_range(DBC *dbc, uint32_t flags, DBT *key, YDB_
 		return DB_NOTFOUND;
 	}
 	dbc->idx += idx;
-	dbc->idx += copy_dbt_from_dbc(dbc, &dbc->value);
+	dbc->idx += copy_value_dbt_from_dbc(dbc, &dbc->value);
 	f(&dbc->key, &dbc->value, extra);
 
 	return 0;
@@ -371,7 +371,7 @@ int lightfs_bstore_dbc_c_getf_next(DBC *dbc, uint32_t flags, YDB_CALLBACK_FUNCTI
 		return DB_NOTFOUND;
 	}
 	dbc->idx += idx;
-	dbc->idx += copy_dbt_from_dbc(dbc, &dbc->value);
+	dbc->idx += copy_value_dbt_from_dbc(dbc, &dbc->value);
 	f(&dbc->key, &dbc->value, extra);
 
 	return 0;

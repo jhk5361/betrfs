@@ -1302,6 +1302,7 @@ abort:
  *   ctx->pos == 3, readdir has emit all entries
  *   ctx->pos == ?, ctx->pos stores a pointer to the position of last readdir
  */
+
 static int ftfs_readdir(struct file *file, struct dir_context *ctx)
 {
 	int ret;
@@ -1309,22 +1310,50 @@ static int ftfs_readdir(struct file *file, struct dir_context *ctx)
 	struct ftfs_sb_info *sbi = inode->i_sb->s_fs_info;
 	DBT *meta_dbt;
 	DB_TXN *txn;
+	struct readdir_ctx *dir_ctx;
+	DBC *cursor;
 
-	// done
-	if (ctx->pos == 3)
-		return 0;
+	//ftfs_error(__func__, "pos %d\n", ctx->pos);
 
-	if (ctx->pos < 2) {
-		if (!dir_emit_dots(file, ctx))
+	if (ctx->pos == 0) {
+		if(!dir_emit_dots(file, ctx))
 			return -ENOMEM;
 		ctx->pos = 2;
 	}
 
+	if (ctx->pos == 2) {
+		dir_ctx = kmalloc(sizeof(struct readdir_ctx), GFP_KERNEL); 
+		ftfs_bstore_txn_begin(dbi->db_env, NULL, &txn, TXN_READONLY);
+		ret = sbi->meta_db->cursor(sbi->meta_db, txn, &cursor, LIGHTFS_META_CURSOR);
+		if (ret) {
+			//ftfs_error(__func__, "FUCK!!!\n");
+			ret = ftfs_bstore_txn_commit(txn, DB_TXN_NOSYNC);
+			kfree(dir_ctx);
+			return 0;
+		}
+
+		dir_ctx->cursor = cursor;
+		dir_ctx->txn = txn;
+		//ftfs_error(__func__, "alloc!!!! dir_ctx: %px, dir_ctx->pos: %d, dir->cursor: %px, dir->txn: %px\n", dir_ctx, dir_ctx->pos, dir_ctx->cursor, dir_ctx->txn);
+	} else {
+		dir_ctx = (struct readdir_ctx *)(ctx->pos);
+		if (dir_ctx->pos == 3) {
+			//ftfs_error(__func__, "free!!!! dir_ctx: %px, dir_ctx->pos: %d, dir->cursor: %px, dir->txn: %px\n", dir_ctx, dir_ctx->pos, dir_ctx->cursor, dir_ctx->txn);
+			dir_ctx->cursor->c_close(dir_ctx->cursor);
+			ftfs_bstore_txn_commit(dir_ctx->txn, DB_TXN_NOSYNC);
+			kfree(dir_ctx);
+			ctx->pos = 3;
+			return 0;
+		}
+	}
+
 	meta_dbt = ftfs_get_read_lock(FTFS_I(inode));
 
-	TXN_GOTO_LABEL(retry);
-	ftfs_bstore_txn_begin(sbi->db_env, NULL, &txn, TXN_READONLY);
-	ret = ftfs_bstore_meta_readdir(sbi->meta_db, meta_dbt, txn, ctx, inode);
+
+	//TXN_GOTO_LABEL(retry);
+	//ftfs_bstore_txn_begin(sbi->db_env, NULL, &txn, TXN_READONLY);
+	ret = ftfs_bstore_meta_readdir(sbi->meta_db, meta_dbt, txn, ctx, inode, dir_ctx);
+	/*
 	if (ret) {
 		DBOP_JUMP_ON_CONFLICT(ret, retry);
 		ftfs_bstore_txn_abort(txn);
@@ -1332,6 +1361,7 @@ static int ftfs_readdir(struct file *file, struct dir_context *ctx)
 		ret = ftfs_bstore_txn_commit(txn, DB_TXN_NOSYNC);
 		COMMIT_JUMP_ON_CONFLICT(ret, retry);
 	}
+	*/
 
 	ftfs_put_read_lock(FTFS_I(inode));
 
@@ -2074,8 +2104,10 @@ static int ftfs_sync_fs(struct super_block *sb, int wait)
 
 static int ftfs_dir_release(struct inode *inode, struct file *filp)
 {
-	if (filp->f_pos != 0 && filp->f_pos != 1)
+	if (filp->f_pos != 0 && filp->f_pos != 1) {
+		//ftfs_error(__func__, "filep->fpos: %px\n", filp->f_pos);
 		kfree((char *)filp->f_pos);
+	}
 
 	return 0;
 }

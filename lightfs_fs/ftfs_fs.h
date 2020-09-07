@@ -277,6 +277,12 @@ static inline int dbt_alloc(DBT *dbt, size_t size)
 	return 0;
 }
 
+struct readdir_ctx {
+	DB_TXN *txn;
+	DBC *cursor;
+	loff_t pos;
+};
+
 struct ftio_vec {
 	struct page *fv_page;
 };
@@ -442,7 +448,7 @@ int ftfs_bstore_meta_del(DB *meta_db, DBT *meta_dbt, DB_TXN *txn);
 
 #ifdef LIGHTFS
 int ftfs_bstore_meta_readdir(DB *meta_db, DBT *meta_dbt, DB_TXN *txn,
-                             struct dir_context *ctx, struct inode *inode);
+                             struct dir_context *ctx, struct inode *inode, struct readdir_ctx *);
 int ftfs_bstore_get(DB *data_db, DBT *data_dbt, DB_TXN *txn, void *buf, struct inode *inode); //TODO
 int ftfs_bstore_put(DB *data_db, DBT *data_dbt, DB_TXN *txn,
                     const void *buf, size_t len, int is_seq); //TODO

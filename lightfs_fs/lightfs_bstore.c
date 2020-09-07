@@ -689,7 +689,7 @@ static unsigned char filetype_table[] = {
 #define ftfs_get_type(mode) filetype_table[(mode >> 12) & 15]
 
 int ftfs_bstore_meta_readdir(DB *meta_db, DBT *meta_dbt, DB_TXN *txn,
-                             struct dir_context *ctx, struct inode *inode)
+                             struct dir_context *ctx, struct inode *inode, struct readdir_ctx *dir_ctx)
 {
 	int ret, r;
 	char *child_meta_key;
@@ -712,9 +712,11 @@ int ftfs_bstore_meta_readdir(DB *meta_db, DBT *meta_dbt, DB_TXN *txn,
 		// KOO:key
 		//copy_child_meta_dbt_from_meta_dbt(&child_meta_dbt, meta_dbt, "");
 		copy_child_meta_dbt_from_inode(&child_meta_dbt, inode, "\x01");
-		ctx->pos = (loff_t)(child_meta_key);
+		//ctx->pos = (loff_t)(child_meta_key);
+		dir_ctx->pos = (loff_t)(child_meta_key);
+		ctx->pos = (loff_t)(dir_ctx);
 	} else {
-		child_meta_key = (char *)ctx->pos;
+		child_meta_key = (char *)dir_ctx->pos;
 		dbt_setup(&child_meta_dbt, child_meta_key, META_KEY_MAX_LEN);
 		child_meta_dbt.size = SIZEOF_META_KEY(child_meta_key);
 	}
@@ -722,9 +724,13 @@ int ftfs_bstore_meta_readdir(DB *meta_db, DBT *meta_dbt, DB_TXN *txn,
 	dbt_setup(&metadata_dbt, &meta, sizeof(meta));
 	dbt_setup_buf(&indirect_meta_dbt, indirect_meta_key,
 	              SIZEOF_CIRCLE_ROOT_META_KEY);
-	ret = meta_db->cursor(meta_db, txn, &cursor, LIGHTFS_META_CURSOR);
-	if (ret)
-		goto out;
+	//ret = meta_db->cursor(meta_db, txn, &cursor, LIGHTFS_META_CURSOR);
+	//if (ret)
+	//	goto out;
+	cursor = dir_ctx->cursor;
+	txn = dir_ctx->txn;
+		
+	//ftfs_error(__func__, "bstore!!!! dir_ctx: %px, dir_ctx->pos: %d, dir->cursor: %px, dir->txn: %px\n", dir_ctx, dir_ctx->pos, dir_ctx->cursor, dir_ctx->txn);
 
 	r = cursor->c_get(cursor, &child_meta_dbt, &metadata_dbt, DB_SET_RANGE);
 	while (!r) {
@@ -732,7 +738,7 @@ int ftfs_bstore_meta_readdir(DB *meta_db, DBT *meta_dbt, DB_TXN *txn,
 		//print_key(__func__, child_meta_key, child_meta_dbt.size);
 		if (!meta_key_is_child_of_ino(child_meta_key, inode->i_ino)) {
 			kfree(child_meta_key);
-			ctx->pos = 3;
+			dir_ctx->pos = 3;
 			break;
 		}
 		if (meta.type == FTFS_METADATA_TYPE_REDIRECT) {
@@ -757,11 +763,11 @@ int ftfs_bstore_meta_readdir(DB *meta_db, DBT *meta_dbt, DB_TXN *txn,
 
 	if (r == DB_NOTFOUND) {
 		kfree(child_meta_key);
-		ctx->pos = 3;
+		dir_ctx->pos = 3;
 		r = 0;
 	}
 
-	cursor->c_close(cursor);
+	//cursor->c_close(cursor);
 
 	if (r)
 		ret = r;

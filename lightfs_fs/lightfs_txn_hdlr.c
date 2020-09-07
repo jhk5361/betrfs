@@ -277,6 +277,7 @@ int lightfs_bstore_dbc_c_get(DBC *dbc, DBT *key, DBT *value, uint32_t flags)
 {
 	uint32_t idx = 0;
 	DB_TXN_BUF *txn_buf = (DB_TXN_BUF *)dbc->extra;
+	//ftfs_error(__func__, "buf_len: %d, buf_idx: %d\n", dbc->buf_len, dbc->idx);
 	if (dbc->idx >= dbc->buf_len) {
 		if (flags == DB_SET_RANGE) {
 			txn_buf->off = 1;
@@ -294,11 +295,14 @@ int lightfs_bstore_dbc_c_get(DBC *dbc, DBT *key, DBT *value, uint32_t flags)
 #endif
 		if (txn_buf->ret == DB_NOTFOUND) {
 			return DB_NOTFOUND;
+		} else {
+			dbc->buf_len = txn_buf->ret;
 		}
 	}
 	//TODO end-of-iter
 	idx = copy_dbt_from_dbc(dbc, key);
-	if (idx == 0) {
+	//print_key(__func__, key->data, key->size);
+	if (idx == 2) {
 		return DB_NOTFOUND;
 	}
 	dbc->idx += idx;

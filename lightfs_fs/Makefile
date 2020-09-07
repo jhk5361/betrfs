@@ -11,8 +11,8 @@ KBUILD_CFLAGS +=  -I./cheeze \
 				  -DLIGHTFS \
 				  -DRB_LOCK \
 				  -DFTFS_DEBUG \
-				  -DCHEEZE \
 				  -DGET_MULTI \
+#				  -DCHEEZE \
 #				  -DEMULATION \
 #				  -DPINK \
 #				  -DLIGHTFS_UPSERT \

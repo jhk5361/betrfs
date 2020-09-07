@@ -190,10 +190,13 @@ int lightfs_io_iter (DB *db, DBC *dbc, DB_TXN_BUF *txn_buf)
 	lightfs_io_set_cheeze_req(&req, buf_idx, buf, txn_buf->buf, 0);
 	cheeze_io(&req);
 	
-	if (req.ubuf_len == 0) {
+	//ftfs_error(__func__, "buf: %px\n len: %d\n, ubuf: %px\n, ubuf_len: %d\n", req.buf, req.buf_len, req.ubuf, req.ubuf_len);
+	if (req.ubuf_len == 2) {
+		//ftfs_error(__func__, "NOTFOUND\n");
 		txn_buf->ret = DB_NOTFOUND;
 	} else {
 		txn_buf->ret = req.ubuf_len;
+		//ftfs_error(__func__, "FOUND %d\n", txn_buf->ret);
 	}
 
 	kmem_cache_free(lightfs_io_small_buf_cachep, buf);

@@ -119,7 +119,7 @@ static bool lightfs_bstore_txn_check(void)
 int lightfs_bstore_txn_begin(DB_TXN *parent, DB_TXN **txn, uint32_t flags)
 {
 	unsigned long irqflags;
-	int ret;
+	int ret;	
 
 	if (txn_hdlr->txn_cnt >= TXN_LIMIT) {
 		spin_lock_irqsave(&txn_hdlr->txn_hdlr_spin, irqflags);
@@ -138,9 +138,13 @@ int lightfs_bstore_txn_begin(DB_TXN *parent, DB_TXN **txn, uint32_t flags)
 	// lightfs_txn_init_once
 	
 	spin_lock(&txn_hdlr->txn_spin);
-	list_add_tail(&((*txn)->txn_list), &txn_hdlr->txn_list);
-	(*txn)->txn_id = txn_hdlr->txn_id++;
+	if (flags == TXN_READONLY) {
+		(*txn)->state = TXN_READ;
+	} else {
+		list_add_tail(&((*txn)->txn_list), &txn_hdlr->txn_list);
+	}
 	txn_hdlr->txn_cnt++;
+	(*txn)->txn_id = txn_hdlr->txn_id++;
 	spin_unlock(&txn_hdlr->txn_spin);
 
 	return 0;
@@ -475,7 +479,7 @@ int lightfs_bstore_txn_commit(DB_TXN *txn, uint32_t flags)
 	//TODO:: is it necessary?
 	spin_lock(&txn_hdlr->txn_spin);
 	if (txn->cnt == 0) {
-		list_del(&txn->txn_list);
+		//list_del(&txn->txn_list);
 		txn_hdlr->txn_cnt--;
 		lightfs_txn_free(txn);
 	} else {
@@ -651,7 +655,7 @@ static int lightfs_c_txn_commit(DB_C_TXN *c_txn)
 	}
 	if (c_txn->state & TXN_FLUSH) {
 		lightfs_bstore_c_txn_commit_flush(c_txn); // blocking commit flush
-		ftfs_error(__func__, "running 개수 %d\n", txn_hdlr->running_c_txn_cnt);
+		//ftfs_error(__func__, "running 개수 %d\n", txn_hdlr->running_c_txn_cnt);
 	}
 	
 	//ftfs_error(__func__, "커밋한다 orderless:%d, ordered:%d\n", txn_hdlr->orderless_c_txn_cnt, txn_hdlr->ordered_c_txn_cnt);
@@ -794,7 +798,7 @@ txn_repeat:
 		}
 		txn = list_first_entry(&txn_hdlr->txn_list, DB_TXN, txn_list);
 		if (txn->state != TXN_COMMITTED) {
-			//ftfs_error(__func__, "첫번째 커밋 안됐다\n");
+			//ftfs_error(__func__, "첫번째 커밋 안됐다 type: %d, cnt: %d\n", commit);
 			spin_unlock(&txn_hdlr->txn_spin);
 			goto wait_for_txn;
 		}
@@ -809,6 +813,7 @@ txn_repeat:
 			if (diff_c_txn_and_txn(txn_hdlr->running_c_txn, txn) < 0) { // transfer
 				//ftfs_error(__func__, "어휴 꽉찼구만 얼른 보낸다.\n");
 				lightfs_c_txn_transfer(txn_hdlr->running_c_txn);
+				//ftfs_error(__func__, "txn_cnt: %d\n", txn_hdlr->txn_cnt)
 				txn_hdlr->running_c_txn = NULL;
 			} else { // can be merge
 				lightfs_c_txn_insert(txn_hdlr->running_c_txn, txn);
@@ -847,7 +852,7 @@ transfer:
 			// transfer a txn that have most children
 		list_for_each_entry(c_txn, &txn_hdlr->orderless_c_txn_list, c_txn_list) {
 			if (!(c_txn->state & TXN_TRANSFERING)) {
-				ftfs_error(__func__, "별로 없나부네 먼저 보낸다.\n");
+				//ftfs_error(__func__, "별로 없나부네 먼저 보낸다.\n");
 				c_txn->state = TXN_FLUSH;
 				txn_hdlr->running_c_txn_id = 0;
 				//txn_hdlr->running_c_txn_id++;

@@ -528,6 +528,7 @@ enum lightfs_txn_state {
 	TXN_INSERTING = 8,
 	TXN_TRANSFERING = 16,
 	TXN_FLUSH = 32,
+	TXN_READ = 64,
 };
 
 enum lightfs_req_type {

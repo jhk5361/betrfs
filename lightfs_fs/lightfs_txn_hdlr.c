@@ -482,7 +482,7 @@ int lightfs_bstore_txn_commit(DB_TXN *txn, uint32_t flags)
 	//smp_mb();
 	//TODO:: is it necessary?
 	spin_lock(&txn_hdlr->txn_spin);
-	if (txn->cnt == 0) {
+	if (txn->state == TXN_READ) {
 		//list_del(&txn->txn_list);
 		txn_hdlr->txn_cnt--;
 		lightfs_txn_free(txn);

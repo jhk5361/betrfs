@@ -23,14 +23,14 @@ struct __lightfs_txn_buffer {
 	uint16_t off;
 	uint16_t len;
 	uint16_t update;
-	uint32_t tid;
 	enum lightfs_req_type type;
-	//char buf[PAGE_SIZE];
-	//struct completion *completionp;
 	char *buf;
-	//void * (*txn_buf_cb)(void *data);
 	uint32_t ret;
 	DB *db;
+	struct rb_node rb_node;
+	bool is_deleted;
+	//void * (*txn_buf_cb)(void *data);
+	//struct completion *completionp;
 };
 
 struct __lightfs_c_txn {
@@ -86,6 +86,9 @@ struct __lightfs_txn_hdlr {
 	DB_IO *db_io;
 	DB_C_TXN *running_c_txn;
 	DB_C_TXN *committing_c_txn;
+	struct rb_root txn_buffer;
+	struct rw_semaphore txn_buffer_sem;
+	spinlock_t txn_buffer_spin;
 };
 
 

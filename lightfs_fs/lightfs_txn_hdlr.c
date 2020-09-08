@@ -60,6 +60,7 @@ static inline void lightfs_txn_buf_init(void *txn_buf)
 	DB_TXN_BUF *_txn_buf = txn_buf;
 	//txn_buf->buf = NULL;
 	INIT_LIST_HEAD(&_txn_buf->txn_buf_list);
+	_txn_buf->is_deleted = 0;
 	//_txn_buf->txn_buf_cb = NULL;
 }
 
@@ -305,6 +306,9 @@ int lightfs_bstore_dbc_c_get(DBC *dbc, DBT *key, DBT *value, uint32_t flags)
 		} else {
 			dbc->buf_len = txn_buf->ret;
 		}
+	}
+	if (flags == DB_SET_RANGE) {
+		return 0;
 	}
 	//TODO end-of-iter
 	size = dbc_get_size(dbc);
@@ -733,6 +737,128 @@ out:
 	return ret;
 }
 #endif
+
+static int lightfs_keycmp(char *akey, uint16_t alen, char *bkey, uint16_t blen)
+{
+	int r;
+	if (alen < blen) {
+		r = memcmp(akey, bkey, alen);
+		if (r)
+			return r;
+		return -1;
+	} else if (alen > blen) {
+		r = memcmp(akey, bkey, blen);
+		if (r)
+			return r;
+		return 1;
+	}
+	// alen == blen
+	return memcmp(akey, bkey, alen);
+}
+
+
+static DB_TXN_BUF *find_val_with_key(struct rb_root *root, char *key, uint16_t key_len)
+{
+	struct rb_node *node = root->rb_node;
+	DB_TXN_BUF *tmp;
+	int result;
+
+	while (node) {
+		//struct rb_kv_node *tmp = container_of(node, struct rb_kv_node, node);
+		tmp = container_of(node, DB_TXN_BUF, rb_node);
+		//result = db->dbenv->i->bt_compare(db, key, &(tmp->key));
+		result = lightfs_keycmp(key, key_len, tmp->key, tmp->key_len);
+
+		if (result < 0)
+			node = node->rb_left;
+		else if (result > 0)
+			node = node->rb_right;
+		else {
+			return tmp;
+		}
+	}
+
+	return NULL;
+}
+
+static int txn_buffer_insert(struct rb_root *root, DB_TXN_BUF *node)
+{
+	struct rb_node **new = &(root->rb_node), *parent = NULL;
+	DB_TXN_BUF *this;
+	int result;
+
+	while (*new) {
+		this = container_of(*new, DB_TXN_BUF, rb_node);
+		result = lightfs_keycmp(node->key, node->key_len, this->key, this->key_len);
+		parent = *new;
+		if (result < 0)
+			new = &((*new)->rb_left);
+		else if (result > 0)
+			new = &((*new)->rb_right);
+		else
+			return -1;
+	}
+
+	rb_link_node(&node->rb_node, parent, new);
+	rb_insert_color(&node->rb_node, root);
+
+	return 0;
+}
+
+
+static int lightfs_txn_buffer_get(struct rb_root *root, DB_TXN_BUF *txn_buf, struct rw_semaphore *sem)
+{
+	DB_TXN_BUF *node;
+	unsigned long irqflags;
+	spin_lock_irqsave(&txn_hdlr->txn_buffer_spin, irqflags);
+
+	down_read(sem);	
+	
+	node = find_val_with_key(root, txn_buf->key, txn_buf->key_len);
+	if (node == NULL) {
+		//up_read(sem);
+		spin_unlock_irqrestore(&txn_hdlr->txn_buffer_spin, irqflags);
+		return 0;
+	}
+	if (node->is_deleted) {
+		memset(txn_buf->buf, 0, txn_buf->len);
+		up_read(sem);
+		spin_unlock_irqrestore(&txn_hdlr->txn_buffer_spin, irqflags);
+		return 0;
+	}
+	memcpy(txn_buf->buf, node->buf, txn_buf->len);
+	up_read(sem);
+	spin_unlock_irqrestore(&txn_hdlr->txn_buffer_spin, irqflags);
+
+	return txn_buf->len;
+}
+
+static int lightfs_txn_buffer_put(struct rb_root *root, DB_TXN_BUF *txn_buf, struct rw_semaphore *sem)
+{
+	DB_TXN_BUF *node;
+	int ret;
+	down_write(sem);
+	node = find_val_with_key(root, txn_buf->key, txn_buf->key_len);
+	if (node != NULL) {
+		if (node->type != txn_buf->type) {
+			ftfs_error(__func__, "txn_buf->type: %d, old_txn_buf->type :%d\n", txn_buf->type, node->type);
+		}
+		memcpy(node->buf, txn_buf->buf + txn_buf->off, txn_buf->len);
+		node->off = txn_buf->off;
+		node->len = txn_buf->len;
+		node->update = txn_buf->update;
+		node->off = txn_buf->off;
+		node->is_deleted = 0;
+		up_write(sem);
+		return 0;
+	}
+	ret = txn_buffer_insert(root, txn_buf);
+	BUG_ON(ret != 0);
+	up_write(sem);
+	return 1;
+}
+
+//static int lightfs_txn_buffer_del(struct rb_root
 
 static bool lightfs_txn_hdlr_check_state(void)
 {

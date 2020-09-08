@@ -213,7 +213,6 @@ int db_del(DB *db, DB_TXN *txnid, DBT *key, uint32_t flags)
 	kfree(node->val.data);
 	kfree(node);
 
-
 	return 0;
 }
 

@@ -55,6 +55,9 @@ static inline void txn_hdlr_alloc(struct __lightfs_txn_hdlr **__txn_hdlr)
 	_txn_hdlr->state = false;
 	_txn_hdlr->contention = false;
 	_txn_hdlr->running_c_txn = NULL;
+	_txn_hdlr->txn_buffer = RB_ROOT;
+	init_rwsem(&_txn_hdlr->txn_buffer_sem);
+	spin_lock_init(&_txn_hdlr->txn_buffer_spin);
 	*__txn_hdlr = _txn_hdlr;
 	
 }

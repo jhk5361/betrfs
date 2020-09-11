@@ -19,7 +19,7 @@ size_t db_cachesize;
 static DB_ENV *XXX_db_env;
 static DB *XXX_data_db;
 static DB *XXX_meta_db;
-static DB *XXX_cache_db;
+static DB *cache_db;
 
 static char ino_key[] = "m\x00\x00\x00\x00\x00\x00\x00\x00next_ino";
 
@@ -527,7 +527,7 @@ int ftfs_bstore_env_open(struct ftfs_sb_info *sbi)
 	if (r)
 		goto err_close_env;
 
-	r = lightfs_cache_create(&sbi->cache_db, db_env, 0);
+	r = lightfs_cache_create(&cache_db, db_env, 0);
 	if (r)
 		goto err_close_env;
 
@@ -576,14 +576,13 @@ int ftfs_bstore_env_open(struct ftfs_sb_info *sbi)
 	XXX_db_env = sbi->db_env;
 	XXX_data_db = sbi->data_db;
 	XXX_meta_db = sbi->meta_db;
-	XXX_cache_db = sbi->cache_db;
 
 	return 0;
 
 err_close:
 	sbi->data_db->close(sbi->data_db, 0);
 	sbi->meta_db->close(sbi->meta_db, 0);
-	sbi->cache_db->close(sbi->cache_db, 0);
+	cache_db->close(cache_db, 0);
 err_close_env:
 	db_env->close(db_env, 0);
 err:
@@ -600,11 +599,11 @@ int ftfs_bstore_env_close(struct ftfs_sb_info *sbi)
 	ret = ftfs_bstore_flush_log(sbi->db_env);
 	if (ret)
 		goto out;
-	BUG_ON(sbi->data_db == NULL || sbi->meta_db == NULL || sbi->db_env == NULL || sbi->cache_db == NULL);
+	BUG_ON(sbi->data_db == NULL || sbi->meta_db == NULL || sbi->db_env == NULL || cache_db == NULL);
 
-	ret = sbi->cache_db->close(sbi->cache_db, 0);
+	ret = cache_db->close(cache_db, 0);
 	BUG_ON(ret);
-	sbi->cache_db = NULL;
+	cache_db = NULL;
 
 	ret = sbi->data_db->close(sbi->data_db, 0);
 	BUG_ON(ret);
@@ -635,13 +634,17 @@ int ftfs_bstore_meta_get(DB *meta_db, DBT *meta_dbt, DB_TXN *txn,
 	dbt_setup(&value, metadata, sizeof(*metadata));
 
 	//print_key(__func__, meta_dbt->data, meta_dbt->size);
-	ret = XXX_cache_db->get(XXX_cache_db, NULL, meta_dbt, &value, 0);
+	ret = cache_db->get(cache_db, NULL, meta_dbt, NULL, 0);
 
 	if (ret == DB_NOTFOUND) {
 		ret = -ENOENT;
-	} else if (ret == DB_FOUND_FREE) {
-			ret = meta_db->get(meta_db, txn, meta_dbt, &value, LIGHTFS_META_GET);
+	} else {
+		ftfs_error(__func__, "meta_get\n");
+		ret = meta_db->get(meta_db, txn, meta_dbt, &value, LIGHTFS_META_GET);
+		if (ret == DB_NOTFOUND)
+			ret = -ENOENT;
 	}
+
 
 	return ret;
 }
@@ -653,7 +656,7 @@ int ftfs_bstore_meta_put(DB *meta_db, DBT *meta_dbt, DB_TXN *txn,
 
 	dbt_setup(&value, metadata, sizeof(*metadata));
 
-	XXX_cache_db->put(XXX_cache_db, NULL, meta_dbt, &value, 0);
+	cache_db->put(cache_db, NULL, meta_dbt, NULL, 0);
 
 	return meta_db->put(meta_db, txn, meta_dbt, &value, LIGHTFS_META_SET);
 }
@@ -665,20 +668,15 @@ int ftfs_bstore_meta_sync_put(DB *meta_db, DBT *meta_dbt, DB_TXN *txn,
 
 	dbt_setup(&value, metadata, sizeof(*metadata));
 
-	XXX_cache_db->put(XXX_cache_db, NULL, meta_dbt, &value, 0);
+	cache_db->put(cache_db, NULL, meta_dbt, NULL, 0);
 
 	return meta_db->sync_put(meta_db, txn, meta_dbt, &value, LIGHTFS_META_SYNC_SET);
 }
 
 
-int ftfs_bstore_meta_del(DB *meta_db, DBT *meta_dbt, DB_TXN *txn, bool is_weak_del)
+int ftfs_bstore_meta_del(DB *meta_db, DBT *meta_dbt, DB_TXN *txn)
 {
-	if (is_weak_del) {
-		XXX_cache_db->weak_del(XXX_cache_db, NULL, meta_dbt, 0);
-		return 0;
-	} else {
-		XXX_cache_db->del(XXX_cache_db, NULL, meta_dbt, 0);
-	}
+	cache_db->del(cache_db, NULL, meta_dbt, 0);
 	return meta_db->del(meta_db, txn, meta_dbt, LIGHTFS_META_DEL);
 }
 
@@ -851,7 +849,6 @@ int ftfs_bstore_trunc(DB *data_db, DBT *meta_dbt,
 	}
 
 
-
 	//ftfs_error(__func__, "안돼 씨바알\n");
 	//KOO:key
 	//ret = alloc_data_dbt_from_meta_dbt(&min_data_key_dbt, meta_dbt,
@@ -873,6 +870,7 @@ int ftfs_bstore_trunc(DB *data_db, DBT *meta_dbt,
 	//                         &max_data_key_dbt,
 	//                         0, LIGHTFS_DATA_DEL_MULTI);
 #ifdef PINK
+	ftfs_error(__func__, "몇개냐?? %d\n", last_block_num - current_block_num + 1);
 	ret = data_db->del_multi(data_db, txn, &min_data_key_dbt, last_block_num - current_block_num + 1, 0, LIGHTFS_DATA_DEL_MULTI);
 #else
 	do {
@@ -1036,6 +1034,7 @@ int ftfs_bstore_scan_pages(DB *data_db, DBT *meta_dbt, DB_TXN *txn, struct ftio 
 	page = ftio_current_page(ftio);
 	current_block_num = PAGE_TO_BLOCK_NUM(page);
 	block_cnt = ftfs_get_block_num_by_size(size) - current_block_num + 1;
+	//ftfs_error(__func__, "block cnt: %d\n", block_cnt);
 
 	//KOO:key
 	//ret = alloc_data_dbt_from_meta_dbt(&data_dbt, meta_dbt,

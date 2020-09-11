@@ -168,7 +168,6 @@ typedef enum {
 #define DB_LOCK_DEADLOCK -30995
 #define DB_LOCK_NOTGRANTED -30994
 #define DB_NOTFOUND -30989
-#define DB_FOUND_FREE -30987
 #define DB_SECONDARY_BAD -30974
 #define DB_DONOTINDEX -30998
 #define DB_BUFFER_SMALL -30999
@@ -680,7 +679,6 @@ struct __lightfs_db {
   int (*close) (DB*, uint32_t);
   int (*cursor) (DB *, DB_TXN *, DBC **, enum lightfs_req_type);
   int (*del) (DB *, DB_TXN *, DBT *, enum lightfs_req_type);
-  int (*weak_del) (DB *, DB_TXN *, DBT *, enum lightfs_req_type);
 #ifdef PINK
   int (*del_multi) (DB *, DB_TXN *, DBT *, uint32_t , bool, enum lightfs_req_type);
 #else

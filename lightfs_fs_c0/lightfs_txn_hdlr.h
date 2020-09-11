@@ -12,6 +12,24 @@
 #include "tokudb.h"
 #include "lightfs.h"
 
+//#define C_TXN_LIMIT_BYTES (2 * 1024 * 1024)
+#define C_TXN_LIMIT_BYTES (1269760)
+//#define C_TXN_LIMIT_BYTES (1551892)
+#define C_TXN_BLOOM_M_BYTES 308 // 512 items, p=0.1
+//#define C_TXN_BLOOM_M_BYTES 791 // 512 items, p=0.01
+#define C_TXN_BLOOM_K 3
+//#define C_TXN_COMMITTING_LIMIT 16
+#define C_TXN_COMMITTING_LIMIT 50
+#define RUNNING_C_TXN_LIMIT 8
+//#define TXN_LIMIT 10
+#define TXN_LIMIT (128 * 1024)
+//#define TXN_THRESHOLD 5
+#define TXN_THRESHOLD (64 * 1024)
+#define DBC_LIMIT 1024
+#define ITER_BUF_SIZE LIGHTFS_IO_LARGE_BUF
+#define KMEM_CACHE_FLAG (SLAB_RECLAIM_ACCOUNT | SLAB_HWCACHE_ALIGN)
+#define TXN_FLUSH_TIME 500
+#define INODE_SIZE 152
 
 
 static inline void txn_hdlr_alloc(struct __lightfs_txn_hdlr **__txn_hdlr)

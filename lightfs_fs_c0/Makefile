@@ -13,7 +13,6 @@ KBUILD_CFLAGS +=  -I./cheeze \
 				  -DGET_MULTI \
 				  -DPINK \
 				  -DFTFS_DEBUG \
-#				  -DTXN_BUFFER \
 #				  -DCHEEZE \
 #				  -DEMULATION \
 #				  -DLIGHTFS_UPSERT \

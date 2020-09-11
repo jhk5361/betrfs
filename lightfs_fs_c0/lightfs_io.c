@@ -127,7 +127,7 @@ int lightfs_io_get (DB *db, DB_TXN_BUF *txn_buf)
 	// cheeze get
 	// need memcpy
 	// not found
-	//print_key(__func__, txn_buf->key, txn_buf->key_len);
+	print_key(__func__, txn_buf->key, txn_buf->key_len);
 	lightfs_io_set_cheeze_req(&req, buf_idx, buf, txn_buf->buf, txn_buf->len);
 	cheeze_io(&req);
 
@@ -234,7 +234,7 @@ int lightfs_io_transfer (DB *db, DB_C_TXN *c_txn)
 				case LIGHTFS_DATA_SEQ_SET:
 					buf_idx = lightfs_io_set_buf_set(buf, txn_buf->type, txn_buf->key_len, txn_buf->key, txn_buf->off, txn_buf->len, txn_buf->buf, buf_idx);
 					cnt++;
-					//print_key(__func__, txn_buf->key, txn_buf->key_len);
+					print_key(__func__, txn_buf->key, txn_buf->key_len);
 			//ftfs_error(__func__, "buf_idx %d, type %d, key_len %d, key %s, off %d, len %d %d", buf_idx, txn_buf->type, txn_buf->key_len, txn_buf->key, txn_buf->off, txn_buf->len, sizeof(enum lightfs_req_type));
 					//db_put(txn_buf->db, NULL, &key, &value, 0);
 					break;
@@ -313,7 +313,7 @@ int lightfs_io_get_multi (DB *db, DB_TXN_BUF *txn_buf)
 	// cheeze get
 	// need memcpy
 	// not found
-	//print_key(__func__, txn_buf->key, txn_buf->key_len);
+	print_key(__func__, txn_buf->key, txn_buf->key_len);
 	lightfs_io_set_cheeze_req(&req, buf_idx, buf, txn_buf->buf, 0);
 	cheeze_io(&req);
 

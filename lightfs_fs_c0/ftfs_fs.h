@@ -101,6 +101,7 @@ struct ftfs_sb_info {
 	DB_ENV *db_env;
 	DB *data_db;
 	DB *meta_db;
+	DB *cache_db;
 #ifdef FTFS_CIRCLE
 	uint64_t max_file_size;
 	uint64_t max_circle_size;
@@ -213,8 +214,8 @@ static inline struct ftfs_inode *FTFS_I(struct inode *inode)
 }
 
 enum ftfs_metadata_type {
-	FTFS_METADATA_TYPE_NORMAL,
-	FTFS_METADATA_TYPE_REDIRECT
+	FTFS_METADATA_TYPE_NORMAL = 0,
+	FTFS_METADATA_TYPE_REDIRECT = 1,
 };
 
 struct ftfs_metadata {
@@ -444,7 +445,7 @@ int ftfs_bstore_meta_put(DB *meta_db, DBT *meta_dbt, DB_TXN *txn,
                          struct ftfs_metadata *metadata);
 int ftfs_bstore_meta_sync_put(DB *meta_db, DBT *meta_dbt, DB_TXN *txn,
                          struct ftfs_metadata *metadata);
-int ftfs_bstore_meta_del(DB *meta_db, DBT *meta_dbt, DB_TXN *txn);
+int ftfs_bstore_meta_del(DB *meta_db, DBT *meta_dbt, DB_TXN *txn, bool is_weak_del);
 
 #ifdef LIGHTFS
 int ftfs_bstore_meta_readdir(DB *meta_db, DBT *meta_dbt, DB_TXN *txn,

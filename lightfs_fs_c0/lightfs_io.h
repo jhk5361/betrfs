@@ -131,7 +131,7 @@ static inline int lightfs_io_set_buf_del_multi(char *buf, uint8_t type, uint16_t
 	idx = lightfs_io_set_type(buf + idx, type, idx);
 	idx = lightfs_io_set_key_len(buf + idx, key_len, idx);
 	idx = lightfs_io_set_key(buf + idx, key_len, key, idx);
-	idx = lightfs_io_set_off(buf, off, idx);
+	idx = lightfs_io_set_off(buf + idx, off, idx);
 	return idx;
 }
 

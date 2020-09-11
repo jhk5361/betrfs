@@ -5,12 +5,15 @@
 
 #include "tokudb.h"
 #include "ftfs_fs.h"
+#include "lightfs.h"
 
 #ifdef RB_LOCK
 static struct mutex rb_lock;
+static spinlock_t rb_spin; 
 #endif
 static struct rw_semaphore rb_sem;
 static struct kmem_cache *rb_kv_cachep;
+static struct kmem_cache *rb_meta_cachep;
 
 /*
  * Create one db as a rbtree. One db_env has a list of rbtrees, each
@@ -22,7 +25,8 @@ struct rb_kv_node {
 };
 
 struct rb_cache_kv_node {
-	DBT key;
+	DBT key, value;
+	int is_updated;
 	struct rb_node node;
 };
 
@@ -72,6 +76,21 @@ static int _dbt_copy(DBT *to, const DBT *from) {
 	memcpy(to->data, from->data, from->size);
 	return 0;
 }
+static int _dbt_no_alloc_copy(DBT *to, const DBT *from) {
+	memcpy(to->data, from->data, from->size);
+	return 0;
+}
+static int _dbt_copy_meta(DBT *to, const DBT *from) {
+	memcpy(to, from, sizeof(DBT));
+	//to->data = kmalloc(from->size, GFP_KERNEL);
+	to->data = kmem_cache_alloc(rb_meta_cachep, GFP_KERNEL);
+	if (to->data == NULL) {
+		return -ENOMEM;
+	}
+	memcpy(to->data, from->data, from->size);
+	return 0;
+}
+
 
 static int db_env_set_cachesize(DB_ENV *env, uint32_t gb, uint32_t b, int ncache)
 {
@@ -603,7 +622,7 @@ static struct rb_cache_kv_node *find_val_with_key_cache(DB *db, const DBT *key)
 		struct rb_cache_kv_node *tmp = container_of(node, struct rb_cache_kv_node, node);
 		int result;
 
-		result = db->dbenv->i->bt_compare(db, key, &(tmp->key));
+		result = db->dbenv->i->bt_compare(db, key, &tmp->key);
 
 		if (result < 0)
 			node = node->rb_left;
@@ -632,7 +651,7 @@ static struct rb_cache_kv_node *find_val_with_key_ge_cache(DB *db, const DBT *ke
 			while ((node = rb_prev(node)) != NULL) {
 				next = tmp;
 				tmp = container_of(node, struct rb_cache_kv_node, node);
-				result = db->dbenv->i->bt_compare(db, key, &(tmp->key));
+				result = db->dbenv->i->bt_compare(db, key, &tmp->key);
 				if (result == 0) {
 					return tmp;
 				} else if (result > 0) {
@@ -675,39 +694,59 @@ static int rb_kv_insert_cache(DB *db, struct rb_cache_kv_node *node)
 
 
 
-int db_cache_get(DB *db, DB_TXN *txnid, DBT *key, uint32_t flags)
+int db_cache_get(DB *db, DB_TXN *txnid, DBT *key, DBT *value, uint32_t flags)
 {
 	struct rb_cache_kv_node *node;
+	unsigned long irqflags;
+	static int eviction_cnt = 0, hit_cnt = 0;
 	//print_key(__func__, key->data, key->size); 
 
 	down_read(&rb_sem);
+	//spin_lock_irqsave(&rb_spin, irqflags);
 	node = find_val_with_key_cache(db, key);
 	if (node == NULL) {
 		up_read(&rb_sem);
+		//spin_unlock_irqrestore(&rb_spin, irqflags);
 		return DB_NOTFOUND;
 	}
-	//memcpy(data->data, node->val.data, data->size);
+	if (node->value.data == NULL) {
+		up_read(&rb_sem);
+		//spin_unlock_irqrestore(&rb_spin, irqflags);
+		ftfs_error(__func__, "요게 eviction 했는데 접근하는 count: %d 히뚜히뚜: %d, 변경: %d\n", ++eviction_cnt, hit_cnt, node->is_updated);
+		return DB_FOUND_FREE;
+	}
+	ftfs_error(__func__, "요게 eviction 했는데 접근하는 count: %d 히뚜히뚜: %d, 변경: %d\n", eviction_cnt, ++hit_cnt, node->is_updated);
+	memcpy(value->data, node->value.data, value->size);
+	//value->data = node->metadata;
 	up_read(&rb_sem);
+	//spin_unlock_irqrestore(&rb_spin, irqflags);
 
 
 	return 0;
 }
 
+// file/directory deletion
 int db_cache_del(DB *db, DB_TXN *txnid, DBT *key, uint32_t flags)
 {
 	struct rb_cache_kv_node *node;
+	unsigned long irqflags;
 	//print_key(__func__, key->data, key->size); 
 	down_write(&rb_sem);
+	//spin_lock_irqsave(&rb_spin, irqflags);
 	node = find_val_with_key_cache(db, key);
 	if (node == NULL) {
 		up_write(&rb_sem);
+		//spin_unlock_irqrestore(&rb_spin, irqflags);
 
 		//ftfs_error(__func__, "NOT FOUND\n");
 		return DB_NOTFOUND;
 	}
 	rb_erase(&node->node, &db->i->kv);
 	up_write(&rb_sem);
+	//spin_unlock_irqrestore(&rb_spin, irqflags);
 	kfree(node->key.data);
+	kmem_cache_free(rb_meta_cachep, node->value.data);
+	//kfree(node->value.data);
 	//kfree(node);
 	kmem_cache_free(rb_kv_cachep, node);
 
@@ -715,29 +754,75 @@ int db_cache_del(DB *db, DB_TXN *txnid, DBT *key, uint32_t flags)
 	return 0;
 }
 
-int db_cache_put(DB *db, DB_TXN *txnid, DBT *key, uint32_t flags)
+// inode eviction
+int db_cache_weak_del(DB *db, DB_TXN *txnid, DBT *key, uint32_t flags)
+{
+	struct rb_cache_kv_node *node;
+	unsigned long irqflags;
+	void *data;
+	static int cnt = 0;
+	ftfs_error(__func__, "eviction cnt: %d\n", ++cnt);
+	down_write(&rb_sem);
+	//spin_lock_irqsave(&rb_spin, irqflags);
+	node = find_val_with_key_cache(db, key);
+	if (node == NULL) {
+		up_write(&rb_sem);
+		//spin_unlock_irqrestore(&rb_spin, irqflags);
+
+		//ftfs_error(__func__, "NOT FOUND\n");
+		return DB_NOTFOUND;
+	}
+	data = node->value.data;
+	node->value.data = NULL;
+	node->is_updated = 0;
+	up_write(&rb_sem);
+	//spin_unlock_irqrestore(&rb_spin, irqflags);
+	kmem_cache_free(rb_meta_cachep, data);
+	//kfree(node->value.data);
+	//kfree(node);
+	//kmem_cache_free(rb_kv_cachep, node);
+
+	return 0;
+}
+
+
+int db_cache_put(DB *db, DB_TXN *txnid, DBT *key, DBT *value, uint32_t flags)
 {
 	/* flags are not used in ftfs */
 	struct rb_cache_kv_node *node;
 	int ret;
+	unsigned long irqflags;
 
 	//print_key(__func__, key->data, key->size); 
 	down_write(&rb_sem);
+	//spin_lock_irqsave(&rb_spin, irqflags);
 	node = find_val_with_key_cache(db, key);
 	if (node != NULL) {
-		BUG_ON(ret != 0);
+		//BUG_ON(ret != 0);
+		if (node->value.data == NULL) {
+			ret = _dbt_copy_meta(&node->value, value);
+			//ftfs_error(__func__, "HIT HIT HIT - 1:\n");
+		} else {
+			_dbt_no_alloc_copy(&node->value, value);
+			node->is_updated++;
+			//ftfs_error(__func__, "HIT HIT HIT - 2: %d\n", node->is_updated);
+		}
 		up_write(&rb_sem);
-		return ret;
+		//spin_unlock_irqrestore(&rb_spin, irqflags);
+		return 0;
 	}
 
 	//node = kmalloc(sizeof(struct rb_cache_kv_node), GFP_KERNEL);
 	node = kmem_cache_alloc(rb_kv_cachep, GFP_KERNEL);
-
 	ret = _dbt_copy(&node->key, key);
-	BUG_ON(ret != 0);
+	//BUG_ON(ret != 0);
+	ret = _dbt_copy_meta(&node->value, value);
+	//BUG_ON(ret != 0);
 	ret = rb_kv_insert_cache(db, node);
-	BUG_ON(ret != 0);
+	node->is_updated = 0;
+	//BUG_ON(ret != 0);
 	up_write(&rb_sem);
+	//spin_unlock_irqrestore(&rb_spin, irqflags);
 	return ret;
 }
 
@@ -753,6 +838,7 @@ static void free_cache_rb_tree(struct rb_node *node)
 	if (node->rb_right)
 	  free_cache_rb_tree(node->rb_right);
 	kfree(kv_node->key.data);
+	kfree(kv_node->value.data);
 	//kfree(kv_node);
 	kmem_cache_free(rb_kv_cachep, kv_node);
 }
@@ -761,6 +847,7 @@ int db_cache_close(DB *db, uint32_t flag)
 {
 	free_cache_rb_tree(db->i->kv.rb_node);
 	kfree(db->i);
+	kmem_cache_destroy(rb_meta_cachep);
 	kmem_cache_destroy(rb_kv_cachep);
 	return 0;
 }
@@ -776,11 +863,16 @@ int db_cache_create(DB **db, DB_ENV *env, uint32_t flags)
 	list_add(&(*db)->i->rbtree_list, &env->i->rbtree_list);
 	(*db)->i->kv = RB_ROOT;
 	init_rwsem(&rb_sem);
-	rb_kv_cachep = kmem_cache_create("lightfs_meta_cachep", sizeof(struct rb_cache_kv_node), 0, SLAB_RECLAIM_ACCOUNT | SLAB_MEM_SPREAD, NULL);
+	spin_lock_init(&rb_spin);
+	rb_kv_cachep = kmem_cache_create("lightfs_kv_cachep", sizeof(struct rb_cache_kv_node), 0, SLAB_RECLAIM_ACCOUNT | SLAB_MEM_SPREAD, NULL);
 	if (!rb_kv_cachep)
 		kmem_cache_destroy(rb_kv_cachep);
-	
 
+	rb_meta_cachep = kmem_cache_create("lightfs_meta_cachep", INODE_SIZE, 0, SLAB_RECLAIM_ACCOUNT | SLAB_MEM_SPREAD, NULL);
+	if (!rb_meta_cachep)
+		kmem_cache_destroy(rb_meta_cachep);
+
+	
 	return 0;
 }
 

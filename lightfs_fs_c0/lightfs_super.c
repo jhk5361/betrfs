@@ -391,7 +391,7 @@ ftfs_do_unlink(DBT *meta_dbt, DB_TXN *txn, struct inode *inode,
 	int ret;
 
 	//ftfs_error(__func__, "어디여?\n");
-	ret = ftfs_bstore_meta_del(sbi->meta_db, meta_dbt, txn);
+	ret = ftfs_bstore_meta_del(sbi->meta_db, meta_dbt, txn, 0);
 	if (!ret && i_size_read(inode) > 0)
 		ret = ftfs_bstore_trunc(sbi->data_db, meta_dbt, txn, 0, 0, inode);
 
@@ -1249,7 +1249,7 @@ static int ftfs_rename(struct inode *old_dir, struct dentry *old_dentry,
 		goto abort;
 
 	ftfs_copy_metadata_from_inode(&old_meta, old_inode);
-	ret = ftfs_bstore_meta_del(sbi->meta_db, old_meta_dbt, txn);
+	ret = ftfs_bstore_meta_del(sbi->meta_db, old_meta_dbt, txn, 0);
 	if (!ret)
 		ret = ftfs_bstore_meta_put(sbi->meta_db, &new_meta_dbt, txn, &old_meta);
 
@@ -1531,6 +1531,7 @@ ftfs_symlink(struct inode *dir, struct dentry *dentry, const char *symname)
 	ino_t ino;
 	DB_TXN *txn;
 
+	ftfs_error(__func__, "dentry: %s, symname: %s\n", dentry->d_name.name, symname);
 	if (len > FTFS_BSTORE_BLOCKSIZE)
 		return -ENAMETOOLONG;
 
@@ -1680,7 +1681,7 @@ static int ftfs_unlink(struct inode *dir, struct dentry *dentry)
 			goto out;
 		TXN_GOTO_LABEL(retry);
 		ftfs_bstore_txn_begin(sbi->db_env, NULL, &txn, TXN_MAY_WRITE);
-		ret = ftfs_bstore_meta_del(sbi->meta_db, &indirect_dbt, txn);
+		ret = ftfs_bstore_meta_del(sbi->meta_db, &indirect_dbt, txn, 0);
 		if (ret) {
 			DBOP_JUMP_ON_CONFLICT(ret, retry);
 			ftfs_bstore_txn_abort(txn);
@@ -1752,6 +1753,7 @@ abort:
 			goto abort;
 	}
 
+	ftfs_error(__func__, "ret: %d, meta.type: %d\n", ret, meta.type);
 	BUG_ON(meta.type != FTFS_METADATA_TYPE_NORMAL);
 commit:
 	err = ftfs_bstore_txn_commit(txn, DB_TXN_NOSYNC);
@@ -2052,8 +2054,11 @@ static void ftfs_evict_inode(struct inode *inode)
 	DB_TXN *txn;
 
 
-	if (inode->i_nlink || (FTFS_I(inode)->ftfs_flags & FTFS_FLAG_DELETED))
+	if (inode->i_nlink || (FTFS_I(inode)->ftfs_flags & FTFS_FLAG_DELETED)) {
+		ftfs_error(__func__, "쫒겨난다\n");
+		ftfs_bstore_meta_del(sbi->cache_db, &(FTFS_I(inode)->meta_dbt), NULL, 1);
 		goto no_delete;
+	}
 
 	meta_dbt = ftfs_get_read_lock(FTFS_I(inode));
 

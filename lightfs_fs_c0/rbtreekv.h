@@ -14,8 +14,9 @@ int db_update(DB *db, DB_TXN *txnid, const DBT *key, const DBT *value, loff_t of
 
 
 int db_cache_del(DB *db, DB_TXN *txnid, DBT *key, uint32_t flags);
-int db_cache_get(DB *db, DB_TXN *txnid, DBT *key, uint32_t flags);
-int db_cache_put(DB *db, DB_TXN *txnid, DBT *key, uint32_t flags);
+int db_cache_weak_del(DB *db, DB_TXN *txnid, DBT *key, uint32_t flags);
+int db_cache_get(DB *db, DB_TXN *txnid, DBT *key, DBT *value, uint32_t flags);
+int db_cache_put(DB *db, DB_TXN *txnid, DBT *key, DBT *value, uint32_t flags);
 int db_cache_close(DB *db, uint32_t flag);
 int db_cache_create(DB **db, DB_ENV *env, uint32_t flags);
 

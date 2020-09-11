@@ -53,6 +53,10 @@ int lightfs_db_del (DB *db , DB_TXN *txn, DBT *key, enum lightfs_req_type type)
 #ifdef PINK
 int lightfs_db_del_multi (DB *db, DB_TXN *txn, DBT *min_key, uint32_t key_cnt, bool a, enum lightfs_req_type type)
 {
+	//TODO:: fix del_multi
+	if (min_key == 0)
+		return 0;
+	else
 		return lightfs_bstore_txn_insert(db, txn, min_key, NULL, key_cnt, type);
 }
 #else 

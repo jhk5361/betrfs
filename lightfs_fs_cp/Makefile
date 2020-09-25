@@ -12,14 +12,17 @@ KBUILD_CFLAGS +=  -I./cheeze \
 				  -DRB_LOCK \
 				  -DGET_MULTI \
 				  -DPINK \
-				  -DCALL_TRACE_TIME \
-#				  -DRB_LOCK \
+				  -DSUPER_NOLOCK \
+				  -DWB\
 #				  -DFTFS_DEBUG \
-#				  -DRB_CACHE \
-#				  -DCALL_TRACE \
-#				  -DTXN_TIME_CHECK \
 #				  -DTIME_CHECK \
 #				  -DTXN_BUFFER \
+#				  -DTXN_TIME_CHECK \
+#				  -DBETR \
+#				  -DCALL_TRACE \
+#				  -DCALL_TRACE_TIME \
+#				  -DRB_LOCK \
+#				  -DRB_CACHE \
 #				  -DCHEEZE \
 #				  -DEMULATION \
 #				  -DLIGHTFS_UPSERT \
@@ -34,12 +37,14 @@ ftfs-y := lightfs_super.o \
 		  lightfs_db_env.o \
 		  lightfs_cache.o \
 		  bloomfilter.o \
+		  lightfs_queue.o \
 		  murmur3.o \
 		  rbtreekv.o \
 		  ./cheeze/queue.o \
 		  ./cheeze/blk.o \
-		  ./cheeze/chr.o \
+		  ./cheeze/shm.o \
 		  ftfs_module.o \
+#./cheeze/chr.o \
 
 
 all:

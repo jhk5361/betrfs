@@ -10,12 +10,14 @@ struct lightfs_cache_val {
 };
 
 struct ht_lock_item {
-	spinlock_t lock;
+	//spinlock_t lock;
+	struct rw_semaphore lock;
 	struct hlist_node node;
 };
 
 struct ht_cache_item {
 	DBT key, value;
+	bool is_weak_del;
 	uint32_t fp;
 	struct hlist_node node;
 };

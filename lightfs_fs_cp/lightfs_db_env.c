@@ -41,6 +41,7 @@ void lightfs_db_env_change_fsync_log_period (DB_ENV *env, uint32_t a)
 
 int lightfs_db_env_close (DB_ENV *env, uint32_t a)
 {
+	lightfs_txn_hdlr_destroy();
 	db_env_close(env, a);
 	kfree(env);
 
@@ -69,7 +70,7 @@ int lightfs_db_env_log_flush (DB_ENV *env, const DB_LSN *a)
 
 int lightfs_db_env_create(DB_ENV **envp, uint32_t flags)
 {
-	*envp = kmalloc(sizeof(DB_ENV), GFP_KERNEL);
+	*envp = kmalloc(sizeof(DB_ENV), GFP_NOIO);
 	if (*envp == NULL) {
 		return -ENOMEM;
 	}

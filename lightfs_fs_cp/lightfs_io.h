@@ -60,7 +60,7 @@ static inline int lightfs_io_set_value_len(char *buf, uint16_t value_len, int id
 
 static inline int lightfs_io_set_value(char *buf, uint16_t value_len, char *value, int idx)
 {
-	memcpy(buf, value, value_len);
+	memcpy(buf, value, value_len); // TMP
 	return idx + value_len;
 }
 

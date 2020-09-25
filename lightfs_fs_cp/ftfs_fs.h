@@ -269,7 +269,7 @@ static inline void dbt_setup_buf(DBT *dbt, const void *data, size_t size)
 
 static inline int dbt_alloc(DBT *dbt, size_t size)
 {
-	dbt->data = kmalloc(size, GFP_KERNEL);
+	dbt->data = kmalloc(size, GFP_NOIO);
 	if (dbt->data == NULL)
 		return -ENOMEM;
 	dbt->size = 0;
@@ -329,7 +329,7 @@ static inline struct ftio *ftio_alloc(int nr_iovecs)
 	struct ftio *ftio;
 
 	ftio = kmalloc(sizeof(*ftio) + nr_iovecs * sizeof(struct ftio_vec),
-	               GFP_KERNEL);
+	               GFP_NOIO);
 	if (ftio) {
 		ftio->ft_max_vecs = nr_iovecs;
 		ftio->ft_vcnt = 0;
@@ -375,7 +375,7 @@ static inline void ftio_setup(struct ftio *ftio, struct list_head *pages,
 		struct page *page = list_entry(pages->prev, struct page, lru);
 		prefetchw(&page->flags);
 		list_del(&page->lru);
-		if (!add_to_page_cache_lru(page, mapping, page->index, GFP_KERNEL))
+		if (!add_to_page_cache_lru(page, mapping, page->index, GFP_NOIO))
 			ftio_add_page(ftio, page);
 		put_page(page);
 		//page_cache_release(page); #koo
@@ -437,6 +437,12 @@ int ftfs_bstore_update_ino(DB *meta_db, DB_TXN *txn, ino_t ino);
 //int ftfs_bstore_data_hot_flush(DB *data_db, struct ftfs_meta_key *meta_key,
 //                               uint64_t start, uint64_t end);
 
+int ftfs_bstore_meta_get_tmp(DB *meta_db, DBT *meta_dbt, DB_TXN *txn,
+                         struct ftfs_metadata *metadata);
+int ftfs_bstore_meta_put_tmp(DB *meta_db, DBT *meta_dbt, DB_TXN *txn,
+                         struct ftfs_metadata *metadata);
+
+
 int ftfs_bstore_env_open(struct ftfs_sb_info *sbi);
 int ftfs_bstore_env_close(struct ftfs_sb_info *sbi);
 
@@ -454,6 +460,8 @@ int ftfs_bstore_meta_readdir(DB *meta_db, DBT *meta_dbt, DB_TXN *txn,
 int ftfs_bstore_get(DB *data_db, DBT *data_dbt, DB_TXN *txn, void *buf, struct inode *inode); //TODO
 int ftfs_bstore_put(DB *data_db, DBT *data_dbt, DB_TXN *txn,
                     const void *buf, size_t len, int is_seq); //TODO
+int ftfs_bstore_put_page(DB *data_db, DBT *data_dbt, DB_TXN *txn,
+                    struct page *page, size_t len, int is_seq); //TODO
 int ftfs_bstore_update(DB *data_db, DBT *data_dbt, DB_TXN *txn,
                        const void *buf, size_t size, loff_t offset); // TODO
 
@@ -486,17 +494,19 @@ int ftfs_bstore_scan_pages(DB *data_db, DBT *meta_dbt, DB_TXN *txn,
 int ftfs_dir_is_empty(DB *meta_db, DBT *meta_dbt, DB_TXN *txn, int *ret);
 #endif
 
-static inline void print_key(char *func, char *key, uint16_t key_len){
+static inline void print_key(const char *func, char *key, uint16_t key_len){
 	uint64_t inode_num, block_num;
+	uint32_t offset;
+	uint32_t remain;
+	offset =1+sizeof(uint64_t);
+	remain=key_len-offset;
 	inode_num = ftfs_key_get_ino(key);
-	uint32_t offset=1+sizeof(uint64_t);
-	uint32_t remain=key_len-offset;
 	if(key[0]=='m'){
-		pr_info("(%s) Mkey: %c%lu%.*s(keylen:%u)\n",func, key[0],inode_num,remain,&key[offset], remain);
+		pr_info("(%s) Mkey: %c%llu%.*s(keylen:%u)\n",func, key[0],inode_num,remain,&key[offset], remain);
 	}
 	else{
 		block_num=ftfs_data_key_get_blocknum(key, key_len);
-		pr_info("(%s) Dkey: %c%lu %lxx(keylen:%u)\n",func, key[0],inode_num, block_num,remain);
+		pr_info("(%s) Dkey: %c%llu %llxx(keylen:%u)\n",func, key[0],inode_num, block_num,remain);
 	}
 
 }
@@ -522,7 +532,7 @@ static inline void lightfs_tb_check (struct time_break *tb) {
 	tb->times[tb->idx++] = ktime_get();
 }
 
-static inline void lightfs_tb_print (char *func_name, struct time_break *tb) {
+static inline void lightfs_tb_print (const char *func_name, struct time_break *tb) {
 	int i = 0;
 	int time;
 	for (i = 0; i < tb->idx - 1; i++) {

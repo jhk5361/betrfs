@@ -2,6 +2,7 @@
 #define __LIGHTFS_H__
 
 #include "ftfs_fs.h"
+#include <linux/workqueue.h>
 
 //#define LIGHTFS_TXN_LIMIT 365
 #define LIGHTFS_TXN_LIMIT 310
@@ -16,20 +17,21 @@
 //#define C_TXN_BLOOM_M_BYTES 791 // 512 items, p=0.01
 #define C_TXN_BLOOM_K 3
 //#define C_TXN_COMMITTING_LIMIT 16
-#define C_TXN_COMMITTING_LIMIT 32
-#define RUNNING_C_TXN_LIMIT 20
+#define C_TXN_COMMITTING_LIMIT 70
+#define RUNNING_C_TXN_LIMIT 16
 //#define TXN_LIMIT 10
-#define SOFT_TXN_LIMIT (32 * 1024)
-#define HARD_TXN_LIMIT (1024 * 1024)
+#define SOFT_TXN_LIMIT (64 * 1024)
+#define HARD_TXN_LIMIT (128 * 1024)
 //#define TXN_THRESHOLD 5
-#define TXN_THRESHOLD HARD_TXN_LIMIT - (1024)
+#define TXN_THRESHOLD (64 * 1024)
 #define DBC_LIMIT 1024
 #define ITER_BUF_SIZE LIGHTFS_IO_LARGE_BUF
-#define KMEM_CACHE_FLAG (SLAB_RECLAIM_ACCOUNT | SLAB_HWCACHE_ALIGN)
-#define TXN_FLUSH_TIME 500
+#define KMEM_CACHE_FLAG (SLAB_RECLAIM_ACCOUNT)
+#define TXN_FLUSH_TIME 1000
 #define TXN_SLEEP_TIME 100
 #define INODE_SIZE 152
 #define HASHTABLE_BITS 20
+#define CONCURRENT_CNT 2
 
 
 
@@ -38,6 +40,23 @@ typedef struct __lightfs_txn_buffer DB_TXN_BUF;
 typedef struct __lightfs_c_txn DB_C_TXN;
 typedef struct __lightfs_c_txn_list DB_C_TXN_LIST;
 typedef uint32_t TXNID_T;
+
+struct lightfs_queue_item {
+    void *data;
+    int id; 
+    struct list_head tag;
+};
+
+struct lightfs_queue {
+    struct semaphore slots;
+    struct semaphore items;
+    struct list_head free_tag_list;
+    struct list_head processing_tag_list;
+    spinlock_t queue_spin;
+    struct lightfs_queue_item **item_arr;
+    int cap;
+};
+
 
 struct __lightfs_txn_buffer {
 	TXNID_T txn_id;
@@ -77,6 +96,11 @@ struct __lightfs_c_txn {
 	//enum lightfs_txn_state state;
 	uint32_t state;
 	struct bloomfilter *filter;
+	struct work_struct transfer_work;
+	struct work_struct commit_work;
+	struct work_struct work;
+	uint64_t workq_id;
+	int committing_cnt;
 };
 
 struct __lightfs_c_txn_list {
@@ -88,7 +112,7 @@ struct __lightfs_db_io {
 	int (*get) (DB *db, DB_TXN_BUF *txn_buf);
 	int (*sync_put) (DB *db, DB_TXN_BUF *txn_buf);
 	int (*iter) (DB *db, DBC *dbc, DB_TXN_BUF *txn_buf);
-	int (*transfer) (DB *db, DB_C_TXN *c_txn);
+	int (*transfer) (DB *db, DB_C_TXN *c_txn, void *(*cb)(void *data), void *extra);
 	int (*commit) (DB_TXN_BUF *txn_buf);
 	int (*close) (DB_IO *db_io);
 	int (*get_multi) (DB *db, DB_TXN_BUF *txn_buf);
@@ -115,7 +139,7 @@ struct __lightfs_txn_hdlr {
 	spinlock_t txn_spin;
 	spinlock_t ordered_c_txn_spin;
 	spinlock_t orderless_c_txn_spin;
-	spinlock_t committed_c_txn_spin;
+	spinlock_t c_txn_spin;
 	spinlock_t running_c_txn_spin;
 	DB_IO *db_io;
 	DB_C_TXN *running_c_txn;
@@ -123,6 +147,10 @@ struct __lightfs_txn_hdlr {
 	struct rb_root txn_buffer;
 	struct rw_semaphore txn_buffer_sem;
 	spinlock_t txn_buffer_spin;
+	struct workqueue_struct *commit_workq;
+	struct workqueue_struct **workqs;
+	struct lightfs_queue *workq_tags;
+	uint64_t current_workq_id;
 };
 
 

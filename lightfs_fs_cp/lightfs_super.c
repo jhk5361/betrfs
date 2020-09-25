@@ -92,6 +92,7 @@ ftfs_copy_metadata_from_inode(struct ftfs_metadata *meta, struct inode *inode)
 	TIMESPEC_TO_TIME_T(meta->u.st.st_ctime, inode->i_ctime);
 }
 
+#ifndef SUPER_NOLOCK
 static inline DBT *ftfs_get_read_lock(struct ftfs_inode *f_inode)
 {
 	down_read(&f_inode->key_lock);
@@ -113,6 +114,26 @@ static inline void ftfs_put_write_lock(struct ftfs_inode *f_inode)
 {
 	up_write(&f_inode->key_lock);
 }
+#else
+static inline DBT *ftfs_get_read_lock(struct ftfs_inode *f_inode)
+{
+	return &f_inode->meta_dbt;
+}
+
+static inline void ftfs_put_read_lock(struct ftfs_inode *f_inode)
+{
+}
+
+static inline DBT *ftfs_get_write_lock(struct ftfs_inode *f_inode)
+{
+	return &f_inode->meta_dbt;
+}
+
+static inline void ftfs_put_write_lock(struct ftfs_inode *f_inode)
+{
+}
+#endif
+
 
 // get the next available (unused ino)
 // we alloc some ino to each cpu, if more are needed, we will do update_ino
@@ -160,7 +181,7 @@ static int alloc_meta_dbt_from_ino(DBT *dbt, uint64_t ino)
 	size_t size;
 
 	size = SIZEOF_CIRCLE_ROOT_META_KEY;
-	meta_key = kmalloc(size, GFP_KERNEL);
+	meta_key = kmalloc(size, GFP_NOIO);
 	if (meta_key == NULL)
 		return -ENOMEM;
 	ftfs_key_set_magic(meta_key, META_KEY_MAGIC);
@@ -210,7 +231,7 @@ alloc_data_dbt_from_meta_dbt(DBT *data_dbt, DBT *meta_dbt, uint64_t block_num)
 	size_t size;
 
 	size = meta_dbt->size + DATA_META_KEY_SIZE_DIFF;
-	data_key = kmalloc(size, GFP_KERNEL);
+	data_key = kmalloc(size, GFP_NOIO);
 	if (data_key == NULL)
 		return -ENOMEM;
 	ftfs_key_set_magic(data_key, DATA_KEY_MAGIC);
@@ -234,7 +255,7 @@ alloc_child_meta_dbt_from_meta_dbt(DBT *dbt, DBT *parent_dbt, const char *name)
 		size = parent_dbt->size + strlen(name) + 2;
 	else
 		size = parent_dbt->size + strlen(name) + 1;
-	meta_key = kmalloc(size, GFP_KERNEL);
+	meta_key = kmalloc(size, GFP_NOIO);
 	if (meta_key == NULL)
 		return -ENOMEM;
 	ftfs_key_set_magic(meta_key, META_KEY_MAGIC);
@@ -278,7 +299,7 @@ alloc_data_dbt_from_inode(DBT *data_dbt, struct inode *inode, uint64_t block_num
 	uint64_t ino = inode->i_ino;
 
 	size = PATH_POS + DATA_META_KEY_SIZE_DIFF;
-	data_key = kmalloc(size, GFP_KERNEL);
+	data_key = kmalloc(size, GFP_NOIO);
 	if (data_key == NULL)
 		return -ENOMEM;
 	ftfs_key_set_magic(data_key, DATA_KEY_MAGIC);
@@ -296,7 +317,7 @@ alloc_data_dbt_from_ino(DBT *data_dbt, uint64_t ino, uint64_t block_num)
 	size_t size;
 
 	size = PATH_POS + DATA_META_KEY_SIZE_DIFF;
-	data_key = kmalloc(size, GFP_KERNEL);
+	data_key = kmalloc(size, GFP_NOIO);
 	if (data_key == NULL)
 		return -ENOMEM;
 	ftfs_key_set_magic(data_key, DATA_KEY_MAGIC);
@@ -316,7 +337,7 @@ alloc_child_meta_dbt_from_inode(DBT *dbt, struct inode *dir, const char *name)
 	uint64_t parent_ino = dir->i_ino;
 
 	size = PATH_POS + strlen(name) + 1;
-	meta_key = kmalloc(size, GFP_KERNEL);
+	meta_key = kmalloc(size, GFP_NOIO);
 	if (meta_key == NULL)
 		return -ENOMEM;
 	ftfs_key_set_magic(meta_key, META_KEY_MAGIC);
@@ -339,7 +360,7 @@ int alloc_meta_dbt_prefix(DBT *prefix_dbt, DBT *meta_dbt)
 		size = meta_dbt->size;
 	else
 		size = meta_dbt->size - 1;
-	prefix_key = kmalloc(size, GFP_KERNEL);
+	prefix_key = kmalloc(size, GFP_NOIO);
 	if (prefix_key == NULL)
 		return -ENOMEM;
 	ftfs_key_set_magic(prefix_key, META_KEY_MAGIC);
@@ -368,7 +389,7 @@ static int alloc_meta_dbt_movdir(DBT *old_prefix_dbt, DBT *new_prefix_dbt,
 	size_t size;
 
 	size = old_dbt->size - old_prefix_dbt->size + new_prefix_dbt->size;
-	new_key = kmalloc(size, GFP_KERNEL);
+	new_key = kmalloc(size, GFP_NOIO);
 	if (new_key == NULL)
 		return -ENOMEM;
 	ftfs_key_set_magic(new_key, META_KEY_MAGIC);
@@ -389,6 +410,7 @@ ftfs_do_unlink(DBT *meta_dbt, DB_TXN *txn, struct inode *inode,
                struct ftfs_sb_info *sbi)
 {
 	int ret;
+
 
 	//ftfs_error(__func__, "어디여?\n");
 	ret = ftfs_bstore_meta_del(sbi->meta_db, meta_dbt, txn, 0);
@@ -561,11 +583,15 @@ static int ftfs_readpage(struct file *file, struct page *page)
 	struct ftfs_sb_info *sbi = inode->i_sb->s_fs_info;
 	DBT *meta_dbt;
 	DB_TXN *txn;
+#ifdef CALL_TRACE_TIME
+	struct time_break tb; 
+	lightfs_tb_init(&tb);
+	lightfs_tb_check(&tb);
+#endif
 
 #ifdef CALL_TRACE
 	ftfs_error(__func__, "\n");
 #endif
-	ftfs_error(__func__, "\n");
 
 	meta_dbt = ftfs_get_read_lock(FTFS_I(inode));
 
@@ -590,7 +616,12 @@ static int ftfs_readpage(struct file *file, struct page *page)
 		SetPageError(page);
 	}
 
-	unlock_page(page);
+	unlock_page(page); //TMP 
+
+#ifdef CALL_TRACE_TIME
+	lightfs_tb_check(&tb);
+	lightfs_tb_print(__func__, &tb);
+#endif
 	return ret;
 }
 
@@ -604,6 +635,13 @@ static int ftfs_readpages(struct file *filp, struct address_space *mapping,
 	DBT *meta_dbt;
 	DB_TXN *txn;
 	struct inode *inode = mapping->host;
+#ifdef CALL_TRACE_TIME
+	struct time_break tb; 
+	lightfs_tb_init(&tb);
+	lightfs_tb_check(&tb);
+#endif
+
+
 #ifdef CALL_TRACE
 	ftfs_error(__func__, "\n");
 #endif
@@ -613,7 +651,6 @@ static int ftfs_readpages(struct file *filp, struct address_space *mapping,
 	if (!ftio)
 		return -ENOMEM;
 	ftio_setup(ftio, pages, nr_pages, mapping);
-	ftfs_error(__func__, "%d\n", nr_pages);
 
 	meta_dbt = ftfs_get_read_lock(ftfs_inode);
 
@@ -636,8 +673,13 @@ static int ftfs_readpages(struct file *filp, struct address_space *mapping,
 		ftio_set_pages_error(ftio);
 	else
 		ftio_set_pages_uptodate(ftio);
-	ftio_unlock_pages(ftio);
+	ftio_unlock_pages(ftio); 
 	ftio_free(ftio);
+
+#ifdef CALL_TRACE_TIME
+	lightfs_tb_check(&tb);
+	lightfs_tb_print(__func__, &tb);
+#endif
 
 	return ret;
 }
@@ -651,6 +693,12 @@ __ftfs_updatepage(struct ftfs_sb_info *sbi, struct inode *inode, DBT *meta_dbt,
 	char *buf;
 	size_t off;
 	DBT data_dbt;
+#ifdef CALL_TRACE_TIME
+	struct time_break tb; 
+	lightfs_tb_init(&tb);
+	lightfs_tb_check(&tb);
+#endif
+
 #ifdef CALL_TRACE
 	ftfs_error(__func__, "\n");
 #endif
@@ -663,13 +711,18 @@ __ftfs_updatepage(struct ftfs_sb_info *sbi, struct inode *inode, DBT *meta_dbt,
 
 	if (ret)
 		return ret;
-	buf = kmap(page);
+	buf = kmap_atomic(page);
 	buf = buf + (offset & ~PAGE_MASK);
 	off = block_get_off_by_position(offset);
 	//ftfs_error(__func__, "page_mask: %llu, get_off: %llu\n", offset & ~PAGE_MASK, off);
 	ret = ftfs_bstore_update(sbi->data_db, &data_dbt, txn, buf, len, off);
-	kunmap(page);
+	kunmap_atomic(buf);
 	dbt_destroy(&data_dbt);
+
+#ifdef CALL_TRACE_TIME
+	lightfs_tb_check(&tb);
+	lightfs_tb_print(__func__, &tb);
+#endif
 
 	return ret;
 }
@@ -682,6 +735,12 @@ __ftfs_writepage(struct ftfs_sb_info *sbi, struct inode *inode, DBT *meta_dbt,
 	int ret;
 	char *buf;
 	DBT data_dbt;
+#ifdef CALL_TRACE_TIME
+	struct time_break tb; 
+	lightfs_tb_init(&tb);
+	lightfs_tb_check(&tb);
+#endif
+
 #ifdef CALL_TRACE
 	ftfs_error(__func__, "\n");
 #endif
@@ -693,10 +752,18 @@ __ftfs_writepage(struct ftfs_sb_info *sbi, struct inode *inode, DBT *meta_dbt,
 	ret = alloc_data_dbt_from_inode(&data_dbt, inode, PAGE_TO_BLOCK_NUM(page));
 	if (ret)
 		return ret;
-	buf = kmap(page);
+#ifndef WB
+	buf = kmap_atomic(page); //WBWB
 	ret = ftfs_bstore_put(sbi->data_db, &data_dbt, txn, buf, len, 0);
-	kunmap(page);
+	kunmap_atomic(buf); //WBWB
+#else
+	ret = ftfs_bstore_put_page(sbi->data_db, &data_dbt, txn, page, len, 0);
+#endif
 	dbt_destroy(&data_dbt);
+#ifdef CALL_TRACE_TIME
+	lightfs_tb_check(&tb);
+	lightfs_tb_print(__func__, &tb);
+#endif
 
 	return ret;
 }
@@ -712,6 +779,12 @@ ftfs_writepage(struct page *page, struct writeback_control *wbc)
 	pgoff_t end_index;
 	unsigned offset;
 	DB_TXN *txn;
+#ifdef CALL_TRACE_TIME
+	struct time_break tb; 
+	lightfs_tb_init(&tb);
+	lightfs_tb_check(&tb);
+#endif
+
 #ifdef CALL_TRACE
 	ftfs_error(__func__, "\n");
 #endif
@@ -746,11 +819,18 @@ ftfs_writepage(struct page *page, struct writeback_control *wbc)
 		ret = ftfs_bstore_txn_commit(txn, DB_TXN_NOSYNC);
 		COMMIT_JUMP_ON_CONFLICT(ret, retry);
 	}
-	end_page_writeback(page);
+	
+#ifndef WB
+	end_page_writeback(page); //WBWB
+#endif
 
 	ftfs_put_read_lock(FTFS_I(inode));
-	unlock_page(page);
+	unlock_page(page); 
 
+#ifdef CALL_TRACE_TIME
+	lightfs_tb_check(&tb);
+	lightfs_tb_print(__func__, &tb);
+#endif
 	return ret;
 }
 
@@ -823,7 +903,7 @@ __ftfs_writepages_write_pages(struct ftfs_wp_node *list, int nr_pages,
                               struct inode *inode, struct ftfs_sb_info *sbi,
                               DBT *data_dbt, int is_seq)
 {
-	int i, ret;
+	int i, ret = 0;
 	loff_t i_size;
 	pgoff_t end_index;
 	unsigned offset;
@@ -833,6 +913,12 @@ __ftfs_writepages_write_pages(struct ftfs_wp_node *list, int nr_pages,
 	DBT *meta_dbt;
 	char *data_key;
 	DB_TXN *txn = NULL;
+#ifdef CALL_TRACE_TIME
+	struct time_break tb; 
+	lightfs_tb_init(&tb);
+	lightfs_tb_check(&tb);
+#endif
+
 #ifdef CALL_TRACE
 	ftfs_error(__func__, "\n");
 #endif
@@ -855,16 +941,28 @@ retry:
 		page = it->page;
 		ftfs_data_key_set_blocknum(data_key, data_dbt->size,
 		                           PAGE_TO_BLOCK_NUM(page));
-		buf = kmap(page);
+#ifndef WB
+		buf = kmap_atomic(page); //WBWB
 		if (page->index < end_index)
 			ret = ftfs_bstore_put(sbi->data_db, data_dbt, txn, buf,
-			                      PAGE_SIZE, is_seq);
+			                      PAGE_SIZE, is_seq); //WBWB
+
 		else if (page->index == end_index && offset != 0)
 			ret = ftfs_bstore_put(sbi->data_db, data_dbt, txn, buf,
-			                      offset, is_seq);
+			                      offset, is_seq); //WBWB
 		else
 			ret = 0;
-		kunmap(page);
+		kunmap_atomic(buf); //WBWB
+#else
+		if (page->index < end_index)
+			ret = ftfs_bstore_put_page(sbi->data_db, data_dbt, txn, page, PAGE_SIZE, is_seq);
+
+		else if (page->index == end_index && offset != 0)
+			ret = ftfs_bstore_put_page(sbi->data_db, data_dbt, txn, page, offset, is_seq);
+		else
+			ret = 0;
+#endif
+
 		if (ret) {
 			DBOP_JUMP_ON_CONFLICT(ret, retry);
 			ftfs_bstore_txn_abort(txn);
@@ -886,11 +984,17 @@ out:
 	ftfs_put_read_lock(FTFS_I(inode));
 	for (i = 0, it = list->next; i < nr_pages; i++, it = it->next) {
 		page = it->page;
-		end_page_writeback(page);
+#ifndef WB
+		end_page_writeback(page); //WBWB
+#endif
 		if (ret)
 			redirty_page_for_writepage(wbc, page);
-		unlock_page(page);
+		unlock_page(page); //TMP
 	}
+#ifdef CALL_TRACE_TIME
+	lightfs_tb_check(&tb);
+	lightfs_tb_print(__func__, &tb);
+#endif
 	return ret;
 }
 
@@ -915,12 +1019,18 @@ static int ftfs_writepages(struct address_space *mapping,
 	int cycled;
 	int range_whole = 0;
 	int tag;
-	int is_seq = 0;
+	//int is_seq = 0;
 	struct inode *inode;
 	struct ftfs_sb_info *sbi;
 	DBT *meta_dbt, data_dbt;
 	int nr_list_pages;
 	struct ftfs_wp_node list, *tail, *it;
+#ifdef CALL_TRACE_TIME
+	struct time_break tb; 
+	lightfs_tb_init(&tb);
+	lightfs_tb_check(&tb);
+#endif
+
 #ifdef CALL_TRACE
 	ftfs_error(__func__, "\n");
 #endif
@@ -953,9 +1063,9 @@ retry:
 
 	/* wkj: add count of total pages for writeback: we need to
 	 * detect sequential I/Os somehow. */
-	if (range_whole || (end - index >= LARGE_IO_THRESHOLD))
-		is_seq = radix_tree_tag_count_exceeds(&mapping->page_tree,
-		                           	index, LARGE_IO_THRESHOLD, tag);
+	//if (range_whole || (end - index >= LARGE_IO_THRESHOLD))
+	//	is_seq = radix_tree_tag_count_exceeds(&mapping->page_tree,
+	//	                           	index, LARGE_IO_THRESHOLD, tag);
 
 	inode = mapping->host;
 	sbi = inode->i_sb->s_fs_info;
@@ -974,7 +1084,8 @@ retry:
 	tail = &list;
 	while (!done && (index <= end)) {
 		int i;
-		nr_pages = pagevec_lookup_tag(&pvec, mapping, &index, tag);
+		//nr_pages = pagevec_lookup_tag(&pvec, mapping, &index, tag); //asd
+		nr_pages = pagevec_lookup_range_tag(&pvec, mapping, &index, end, tag);
 		if (nr_pages == 0)
 			break;
 
@@ -987,11 +1098,11 @@ retry:
 			}
 
 			txn_done_index = page->index;
-			lock_page(page);
+			lock_page(page); 
 
 			if (unlikely(page->mapping != mapping)) {
 continue_unlock:
-				unlock_page(page);
+				unlock_page(page); 
 				continue;
 			}
 
@@ -1011,10 +1122,10 @@ continue_unlock:
 			if (!clear_page_dirty_for_io(page))
 				goto continue_unlock;
 
-			set_page_writeback(page);
+			set_page_writeback(page); //asd
 			if (tail->next == NULL) {
 				tail->next = kmem_cache_alloc(
-					ftfs_writepages_cachep, GFP_KERNEL);
+					ftfs_writepages_cachep, GFP_NOIO);
 				tail->next->next = NULL;
 			}
 			tail = tail->next;
@@ -1023,7 +1134,7 @@ continue_unlock:
 			if (nr_list_pages >= FTFS_WRITEPAGES_LIST_SIZE) {
 				ret = __ftfs_writepages_write_pages(&list,
 					nr_list_pages, wbc, inode, sbi,
-					&data_dbt, is_seq);
+					&data_dbt, 0);
 				if (ret)
 					goto free_dkey_out;
 				done_index = txn_done_index;
@@ -1043,7 +1154,7 @@ continue_unlock:
 
 	if (nr_list_pages > 0) {
 		ret = __ftfs_writepages_write_pages(&list, nr_list_pages, wbc,
-			inode, sbi, &data_dbt, is_seq);
+			inode, sbi, &data_dbt, 0);
 		if (!ret)
 			done_index = txn_done_index;
 	}
@@ -1065,6 +1176,10 @@ out:
 	if (wbc->range_cyclic || (range_whole && wbc->nr_to_write > 0))
 		mapping->writeback_index = done_index;
 
+#ifdef CALL_TRACE_TIME
+	lightfs_tb_check(&tb);
+	lightfs_tb_print(__func__, &tb);
+#endif
 	return ret;
 }
 
@@ -1082,6 +1197,12 @@ ftfs_write_begin(struct file *file, struct address_space *mapping,
 	struct ftfs_sb_info *sbi = inode->i_sb->s_fs_info;
 	DBT *meta_dbt;
 	DB_TXN *txn;
+#ifdef CALL_TRACE_TIME
+	struct time_break tb; 
+	lightfs_tb_init(&tb);
+	lightfs_tb_check(&tb);
+#endif
+
 	from = pos & (PAGE_SIZE -1);
 	to = from + len;
 #ifdef CALL_TRACE
@@ -1089,10 +1210,17 @@ ftfs_write_begin(struct file *file, struct address_space *mapping,
 #endif
 
 	page = grab_cache_page_write_begin(mapping, index, flags);
+	//page = pagecache_get_page(mapping, index, FGP_LOCK | FGP_WRITE | FGP_CREAT, GFP_NOIO);
 	if (!page) {
-		ftfs_error(__func__, "메모리가 부족햐~~!!\n");
+		pr_info("메모리가 부족햐~~!!\n");
 		ret = -ENOMEM;
 	}
+
+#ifdef CALL_TRACE_TIME
+	lightfs_tb_check(&tb);
+#endif
+
+	/*
 #ifndef LIGHTFS_UPSERT
 	if (!PageDirty(page) && pos + len <= i_size_read(inode)) {
 		if (to != PAGE_SIZE || from) {
@@ -1115,9 +1243,15 @@ ftfs_write_begin(struct file *file, struct address_space *mapping,
 		}
 	}
 #endif
+*/
 	/* don't read page if not uptodate */
 
 	*pagep = page;
+
+#ifdef CALL_TRACE_TIME
+	lightfs_tb_check(&tb);
+	lightfs_tb_print(__func__, &tb);
+#endif
 	return ret;
 }
 
@@ -1129,23 +1263,16 @@ ftfs_write_end(struct file *file, struct address_space *mapping,
 	/* make sure that ftfs can't guarantee uptodate page */
 	loff_t last_pos = pos + copied;
 	struct inode *inode = page->mapping->host;
+	loff_t old_size = inode->i_size;
 	char *buf;
-#ifdef LIGHTFS_UPSERT
-	struct ftfs_sb_info *sbi = inode->i_sb->s_fs_info;
-	int ret;
-	DB_TXN *txn;
-	DBT *meta_dbt;
-#endif
-#ifdef CALL_TRACE
-	ftfs_error(__func__, "\n");
+	bool i_size_changed = 0;
+#ifdef CALL_TRACE_TIME
+	struct time_break tb; 
+	lightfs_tb_init(&tb);
+	lightfs_tb_check(&tb);
 #endif
 
-	/*
-	 * 1. if page is uptodate/writesize=PAGE_SIZE (we have new content),
-	 *    write to page cache and wait for generic_writepage to write
-	 *    to disk (generic aio style);
-	 * 2. if not, only write to disk so that we avoid read-before-write.
-	 */
+#if 0
 	if (PageDirty(page) || copied == PAGE_SIZE) {
 	//ftfs_error(__func__, "111 copied: %llu, pos: %llu, file size: %llu, index: %llu file_name: %s\n", copied, pos, i_size_read(inode), page->index, file_dentry(file)->d_name.name);
 		goto postpone_to_writepage;
@@ -1201,6 +1328,54 @@ postpone_to_writepage:
 	}
 
 	return copied;
+#endif
+
+
+#ifdef CALL_TRACE
+	ftfs_error(__func__, "\n");
+#endif
+
+	if (!PageUptodate(page)) {
+		if (copied < len) {
+			ftfs_error(__func__, "copy!!!\n");
+		}
+		SetPageUptodate(page);
+	}
+	//SetPageUptodate(page); // asd
+	if (!PageDirty(page))
+		__set_page_dirty_nobuffers(page); //asd
+		//set_page_dirty(page);
+	//if (!PageDirty(page)) //asd
+#ifdef CALL_TRACE_TIME
+	lightfs_tb_check(&tb);
+#endif
+
+
+	if (last_pos > inode->i_size) {
+		i_size_write(inode, last_pos);
+		i_size_changed = 1;
+	}
+
+#ifdef CALL_TRACE_TIME
+	lightfs_tb_check(&tb);
+#endif
+	unlock_page(page);
+	put_page(page);
+	//page_cache_release(page);
+#ifdef CALL_TRACE_TIME
+	lightfs_tb_check(&tb);
+#endif
+	if (old_size < pos)
+		pagecache_isize_extended(inode, old_size, pos);
+
+	if (i_size_changed) {
+		mark_inode_dirty(inode);
+	}
+#ifdef CALL_TRACE_TIME
+	lightfs_tb_check(&tb);
+	lightfs_tb_print(__func__, &tb);
+#endif
+	return copied;
 }
 
 /* Called before freeing a page - it writes back the dirty page.
@@ -1225,6 +1400,12 @@ static int ftfs_rename(struct inode *old_dir, struct dentry *old_dentry,
 	    *new_inode_meta_dbt;
 	struct ftfs_metadata old_meta;
 	DB_TXN *txn;
+#ifdef CALL_TRACE_TIME
+	struct time_break tb; 
+	lightfs_tb_init(&tb);
+	lightfs_tb_check(&tb);
+#endif
+
 #ifdef CALL_TRACE
 	ftfs_error(__func__, "\n");
 #endif
@@ -1312,6 +1493,10 @@ static int ftfs_rename(struct inode *old_dir, struct dentry *old_dentry,
 	ftfs_put_read_lock(FTFS_I(new_dir));
 
 
+#ifdef CALL_TRACE_TIME
+	lightfs_tb_check(&tb);
+	lightfs_tb_print(__func__, &tb);
+#endif
 	return 0;
 
 abort1:
@@ -1325,6 +1510,10 @@ abort:
 	ftfs_put_read_lock(FTFS_I(old_dir));
 	ftfs_put_read_lock(FTFS_I(new_dir));
 
+#ifdef CALL_TRACE_TIME
+	lightfs_tb_check(&tb);
+	lightfs_tb_print(__func__, &tb);
+#endif
 	return ret;
 }
 
@@ -1345,6 +1534,12 @@ static int ftfs_readdir(struct file *file, struct dir_context *ctx)
 	DB_TXN *txn;
 	struct readdir_ctx *dir_ctx;
 	DBC *cursor;
+#ifdef CALL_TRACE_TIME
+	struct time_break tb; 
+	lightfs_tb_init(&tb);
+	lightfs_tb_check(&tb);
+#endif
+
 #ifdef CALL_TRACE
 	ftfs_error(__func__, "\n");
 #endif
@@ -1358,7 +1553,7 @@ static int ftfs_readdir(struct file *file, struct dir_context *ctx)
 	}
 
 	if (ctx->pos == 2) {
-		dir_ctx = kmalloc(sizeof(struct readdir_ctx), GFP_KERNEL); 
+		dir_ctx = kmalloc(sizeof(struct readdir_ctx), GFP_NOIO); 
 		ftfs_bstore_txn_begin(dbi->db_env, NULL, &txn, TXN_READONLY);
 		ret = sbi->meta_db->cursor(sbi->meta_db, txn, &cursor, LIGHTFS_META_CURSOR);
 		if (ret) {
@@ -1401,6 +1596,10 @@ static int ftfs_readdir(struct file *file, struct dir_context *ctx)
 
 	ftfs_put_read_lock(FTFS_I(inode));
 
+#ifdef CALL_TRACE_TIME
+	lightfs_tb_check(&tb);
+	lightfs_tb_print(__func__, &tb);
+#endif
 	return ret;
 }
 
@@ -1414,6 +1613,12 @@ ftfs_fsync(struct file *file, loff_t start, loff_t end, int datasync)
 	DBT *meta_dbt;
 	struct ftfs_metadata meta;
 	DB_TXN *txn;
+#ifdef CALL_TRACE_TIME
+	struct time_break tb; 
+	lightfs_tb_init(&tb);
+	lightfs_tb_check(&tb);
+#endif
+
 #ifdef CALL_TRACE
 	ftfs_error(__func__, "\n");
 #endif
@@ -1440,6 +1645,10 @@ ftfs_fsync(struct file *file, loff_t start, loff_t end, int datasync)
 		ftfs_put_read_lock(FTFS_I(inode));
 	}
 
+#ifdef CALL_TRACE_TIME
+	lightfs_tb_check(&tb);
+	lightfs_tb_print(__func__, &tb);
+#endif
 	return ret;
 }
 
@@ -1450,12 +1659,14 @@ ftfs_mknod(struct inode *dir, struct dentry *dentry, umode_t mode, dev_t rdev)
 	struct inode *inode = NULL;
 	struct ftfs_metadata meta;
 	struct ftfs_sb_info *sbi = dir->i_sb->s_fs_info;
+	loff_t dir_size;
 	DBT *dir_meta_dbt, meta_dbt;
 	ino_t ino;
 	DB_TXN *txn;
 #ifdef CALL_TRACE_TIME
 	struct time_break tb; 
 	lightfs_tb_init(&tb);
+	lightfs_tb_check(&tb);
 #endif
 
 #ifdef CALL_TRACE
@@ -1469,6 +1680,7 @@ ftfs_mknod(struct inode *dir, struct dentry *dentry, umode_t mode, dev_t rdev)
 	//if (rdev && !new_valid_dev(rdev))
 	//	return -EINVAL;
 
+	//////////////dir_meta_dbt = ftfs_get_read_lock(FTFS_I(dir));
 	dir_meta_dbt = ftfs_get_read_lock(FTFS_I(dir));
 	//KOO:key
 	//ret = alloc_child_meta_dbt_from_meta_dbt(&meta_dbt, dir_meta_dbt,
@@ -1494,6 +1706,7 @@ err_free_dbt:
 	lightfs_tb_check(&tb);
 #endif
 
+	dir_size = i_size_read(dir);
 
 	ftfs_setup_metadata(&meta, mode, 0, rdev, ino);
 	inode = ftfs_setup_inode(dir->i_sb, &meta_dbt, &meta);
@@ -1504,7 +1717,6 @@ err_free_dbt:
 #ifdef CALL_TRACE_TIME
 	lightfs_tb_check(&tb);
 #endif
-
 
 	TXN_GOTO_LABEL(retry);
 	ftfs_bstore_txn_begin(sbi->db_env, NULL, &txn, TXN_MAY_WRITE);
@@ -1533,13 +1745,17 @@ err_free_dbt:
 #ifdef CALL_TRACE_TIME
 	lightfs_tb_check(&tb);
 #endif
+	i_size_write(dir, dir_size + 1);
+
 
 out:
+	/////////////////////////ftfs_put_read_lock(FTFS_I(dir));
 	ftfs_put_read_lock(FTFS_I(dir));
 #ifdef CALL_TRACE_TIME
 	lightfs_tb_check(&tb);
 	lightfs_tb_print(__func__, &tb);
 #endif
+
 
 
 	return ret;
@@ -1572,6 +1788,13 @@ static int ftfs_rmdir(struct inode *dir, struct dentry *dentry)
 	struct ftfs_inode *ftfs_inode = FTFS_I(inode);
 	DBT *meta_dbt;
 	DB_TXN *txn;
+	loff_t dir_size;
+#ifdef CALL_TRACE_TIME
+	struct time_break tb; 
+	lightfs_tb_init(&tb);
+	lightfs_tb_check(&tb);
+#endif
+
 #ifdef CALL_TRACE
 	ftfs_error(__func__, "\n");
 #endif
@@ -1582,6 +1805,10 @@ static int ftfs_rmdir(struct inode *dir, struct dentry *dentry)
 		ret = -EINVAL;
 		goto out;
 	}
+
+	dir_size = i_size_read(inode);
+
+	/*
 
 	TXN_GOTO_LABEL(retry);
 	ftfs_bstore_txn_begin(sbi->db_env, NULL, &txn, TXN_READONLY);
@@ -1595,7 +1822,6 @@ static int ftfs_rmdir(struct inode *dir, struct dentry *dentry)
 	ret = ftfs_bstore_txn_commit(txn, DB_TXN_NOSYNC);
 	COMMIT_JUMP_ON_CONFLICT(ret, retry);
 
-
 	if (!r)
 		ret = -ENOTEMPTY;
 	else {
@@ -1604,9 +1830,22 @@ static int ftfs_rmdir(struct inode *dir, struct dentry *dentry)
 		ret = 0;
 	}
 
+	*/
+	if (dir_size) {
+		ret = -ENOTEMPTY;
+	} else {
+		clear_nlink(inode);
+		mark_inode_dirty(inode);
+		ret = 0;
+	}
+
 out:
 	ftfs_put_read_lock(ftfs_inode);
 
+#ifdef CALL_TRACE_TIME
+	lightfs_tb_check(&tb);
+	lightfs_tb_print(__func__, &tb);
+#endif
 	return ret;
 }
 
@@ -1622,9 +1861,16 @@ ftfs_symlink(struct inode *dir, struct dentry *dentry, const char *symname)
 	size_t len = strlen(symname);
 	ino_t ino;
 	DB_TXN *txn;
+#ifdef CALL_TRACE_TIME
+	struct time_break tb; 
+	lightfs_tb_init(&tb);
+	lightfs_tb_check(&tb);
+#endif
+
 #ifdef CALL_TRACE
 	ftfs_error(__func__, "\n");
 #endif
+	ftfs_error(__func__, "\n");
 
 	if (len > FTFS_BSTORE_BLOCKSIZE)
 		return -ENAMETOOLONG;
@@ -1686,6 +1932,10 @@ abort:
 out:
 	ftfs_put_read_lock(FTFS_I(dir));
 
+#ifdef CALL_TRACE_TIME
+	lightfs_tb_check(&tb);
+	lightfs_tb_print(__func__, &tb);
+#endif
 	return ret;
 }
 
@@ -1698,6 +1948,11 @@ static int ftfs_link(struct dentry *old_dentry,
 	DBT *meta_dbt, *dir_meta_dbt, new_meta_dbt;
 	struct ftfs_metadata meta;
 	DB_TXN *txn;
+#ifdef CALL_TRACE_TIME
+	struct time_break tb; 
+	lightfs_tb_init(&tb);
+	lightfs_tb_check(&tb);
+#endif
 
 #ifdef CALL_TRACE
 	ftfs_error(__func__, "\n");
@@ -1750,6 +2005,10 @@ static int ftfs_link(struct dentry *old_dentry,
 	ftfs_put_read_lock(FTFS_I(dir));
 
 
+#ifdef CALL_TRACE_TIME
+	lightfs_tb_check(&tb);
+	lightfs_tb_print(__func__, &tb);
+#endif
 out:
 	return ret;
 }
@@ -1759,12 +2018,20 @@ static int ftfs_unlink(struct inode *dir, struct dentry *dentry)
 	int ret = 0;
 	struct inode *inode = dentry->d_inode;
 	DBT *dir_meta_dbt, *meta_dbt;
+	loff_t dir_size;
+#ifdef CALL_TRACE_TIME
+	struct time_break tb; 
+	lightfs_tb_init(&tb);
+	lightfs_tb_check(&tb);
+#endif
 
 #ifdef CALL_TRACE
 	ftfs_error(__func__, "\n");
 #endif
 	dir_meta_dbt = ftfs_get_read_lock(FTFS_I(dir));
 	meta_dbt = ftfs_get_read_lock(FTFS_I(inode));
+
+	dir_size = i_size_read(dir);
 
 	//if (meta_key_is_circle_root(meta_dbt->data)) {
 	if (!meta_key_is_circle_root(meta_dbt->data)) {
@@ -1803,8 +2070,13 @@ out:
 		return ret;
 	drop_nlink(inode);
 	mark_inode_dirty(inode);
+	
+	i_size_write(dir, dir_size - 1);
 
-
+#ifdef CALL_TRACE_TIME
+	lightfs_tb_check(&tb);
+	lightfs_tb_print(__func__, &tb);
+#endif
 	return ret;
 }
 
@@ -1838,6 +2110,7 @@ ftfs_lookup(struct inode *dir, struct dentry *dentry, unsigned int flags)
 	r = alloc_child_meta_dbt_from_inode(&meta_dbt, dir, dentry->d_name.name);
 	if (r) {
 		inode = ERR_PTR(r);
+		pr_info("에러다 에러 inode: %px\n", inode);
 		goto out;
 	}
 
@@ -1890,6 +2163,9 @@ commit:
 
 out:
 	ftfs_put_read_lock(FTFS_I(dir));
+	if (IS_ERR(inode)) {
+		pr_info("inode error: %p\n", inode);
+	}
 	ret = d_splice_alias(inode, dentry);
 #ifdef CALL_TRACE_TIME
 	lightfs_tb_check(&tb);
@@ -1904,6 +2180,11 @@ static int ftfs_setattr(struct dentry *dentry, struct iattr *iattr)
 	int ret;
 	struct inode *inode = dentry->d_inode;
 	loff_t size;
+#ifdef CALL_TRACE_TIME
+	struct time_break tb; 
+	lightfs_tb_init(&tb);
+	lightfs_tb_check(&tb);
+#endif
 
 #ifdef CALL_TRACE
 	ftfs_error(__func__, "\n");
@@ -1911,6 +2192,7 @@ static int ftfs_setattr(struct dentry *dentry, struct iattr *iattr)
 	//ftfs_error(__func__, "어디여?\n");
 	//ret = inode_change_ok(inode, iattr);
 	ret = setattr_prepare(dentry, iattr);
+
 	if (ret)
 		return ret;
 
@@ -1941,18 +2223,18 @@ static int ftfs_setattr(struct dentry *dentry, struct iattr *iattr)
 		//ftfs_error(__func__, "장난 똥떄리냐 block_num:%d, block_off:%d, size:%d \n", block_num, block_off, size);
 
 		meta_dbt = ftfs_get_read_lock(ftfs_inode);
-		TXN_GOTO_LABEL(retry);
-		ftfs_bstore_txn_begin(sbi->db_env, NULL, &txn, TXN_MAY_WRITE);
+		//TXN_GOTO_LABEL(retry);
+		//ftfs_bstore_txn_begin(sbi->db_env, NULL, &txn, TXN_MAY_WRITE);
 		ret = ftfs_bstore_trunc(sbi->data_db, meta_dbt, txn,
 		                        block_num, block_off, inode);
-		if (ret) {
-			DBOP_JUMP_ON_CONFLICT(ret, retry);
-			ftfs_bstore_txn_abort(txn);
-			ftfs_put_read_lock(ftfs_inode);
-			goto err;
-		}
-		ret = ftfs_bstore_txn_commit(txn, DB_TXN_NOSYNC);
-		COMMIT_JUMP_ON_CONFLICT(ret, retry);
+		//if (ret) {
+		//	DBOP_JUMP_ON_CONFLICT(ret, retry);
+		//	ftfs_bstore_txn_abort(txn);
+		//	ftfs_put_read_lock(ftfs_inode);
+		//	goto err;
+		//}
+		//ret = ftfs_bstore_txn_commit(txn, DB_TXN_NOSYNC);
+		//COMMIT_JUMP_ON_CONFLICT(ret, retry);
 		ftfs_put_read_lock(ftfs_inode);
 
 skip_txn:
@@ -1962,6 +2244,10 @@ skip_txn:
 	setattr_copy(inode, iattr);
 	mark_inode_dirty(inode);
 
+#ifdef CALL_TRACE_TIME
+	lightfs_tb_check(&tb);
+	lightfs_tb_print(__func__, &tb);
+#endif
 err:
 	return ret;
 }
@@ -2027,6 +2313,11 @@ static const char *ftfs_get_link(struct dentry *dentry,
 	void *buf;
 	struct ftfs_sb_info *sbi;
 	struct ftfs_inode *ftfs_inode;
+#ifdef CALL_TRACE_TIME
+	struct time_break tb; 
+	lightfs_tb_init(&tb);
+	lightfs_tb_check(&tb);
+#endif
 
 #ifdef CALL_TRACE
 	ftfs_error(__func__, "\n");
@@ -2041,7 +2332,7 @@ static const char *ftfs_get_link(struct dentry *dentry,
 	DBT data_dbt;
 	DB_TXN *txn;
 
-	buf = kmalloc(FTFS_BSTORE_BLOCKSIZE, GFP_KERNEL);
+	buf = kmalloc(FTFS_BSTORE_BLOCKSIZE, GFP_NOIO);
 	if (!buf) {
 		ret = ERR_PTR(-ENOMEM);
 		goto err1;
@@ -2079,6 +2370,11 @@ err2:
 		do_delayed_call(done);
 		clear_delayed_call(done);
 	}
+
+#ifdef CALL_TRACE_TIME
+	lightfs_tb_check(&tb);
+	lightfs_tb_print(__func__, &tb);
+#endif
 err1:
 	return ret;
 }
@@ -2094,7 +2390,7 @@ static void *ftfs_follow_link(struct dentry *dentry, struct nameidata *nd)
 	DBT *meta_dbt, data_dbt;
 	DB_TXN *txn;
 
-	buf = kmalloc(FTFS_BSTORE_BLOCKSIZE, GFP_KERNEL);
+	buf = kmalloc(FTFS_BSTORE_BLOCKSIZE, GFP_NOIO);
 	if (!buf) {
 		ret = ERR_PTR(-ENOMEM);
 		goto err1;
@@ -2145,19 +2441,39 @@ static void ftfs_put_link(struct dentry *dentry, struct nameidata *nd,
 static struct inode *ftfs_alloc_inode(struct super_block *sb)
 {
 	struct ftfs_inode *ftfs_inode;
+#ifdef CALL_TRACE_TIME
+	struct time_break tb; 
+	lightfs_tb_init(&tb);
+	lightfs_tb_check(&tb);
+#endif
 
 #ifdef CALL_TRACE
 	ftfs_error(__func__, "\n");
 #endif
-	ftfs_inode = kmem_cache_alloc(ftfs_inode_cachep, GFP_KERNEL);
+	ftfs_inode = kmem_cache_alloc(ftfs_inode_cachep, GFP_NOIO);
 	// initialization in ftfs_i_init_once
 
+#ifdef CALL_TRACE_TIME
+	lightfs_tb_check(&tb);
+	lightfs_tb_print(__func__, &tb);
+#endif
 	return ftfs_inode ? &ftfs_inode->vfs_inode : NULL;
+}
+
+static void lightfs_i_callback(struct rcu_head *head)
+{
+	struct inode *inode = container_of(head, struct inode, i_rcu);
+	kmem_cache_free(ftfs_inode_cachep, FTFS_I(inode));
 }
 
 static void ftfs_destroy_inode(struct inode *inode)
 {
 	struct ftfs_inode *ftfs_inode = FTFS_I(inode);
+#ifdef CALL_TRACE_TIME
+	struct time_break tb; 
+	lightfs_tb_init(&tb);
+	lightfs_tb_check(&tb);
+#endif
 
 #ifdef CALL_TRACE
 	ftfs_error(__func__, "\n");
@@ -2166,8 +2482,15 @@ static void ftfs_destroy_inode(struct inode *inode)
 	if (ftfs_inode->meta_dbt.data &&
 	    ftfs_inode->meta_dbt.data != &root_meta_key)
 		dbt_destroy(&ftfs_inode->meta_dbt);
+	ftfs_put_write_lock(ftfs_inode);
 
-	kmem_cache_free(ftfs_inode_cachep, ftfs_inode);
+	call_rcu(&inode->i_rcu, lightfs_i_callback);
+	//kmem_cache_free(ftfs_inode_cachep, ftfs_inode);
+
+#ifdef CALL_TRACE_TIME
+	lightfs_tb_check(&tb);
+	lightfs_tb_print(__func__, &tb);
+#endif
 }
 
 static int
@@ -2178,6 +2501,11 @@ ftfs_write_inode(struct inode *inode, struct writeback_control *wbc)
 	DBT *meta_dbt;
 	struct ftfs_metadata meta;
 	struct ftfs_sb_info *sbi = inode->i_sb->s_fs_info;
+#ifdef CALL_TRACE_TIME
+	struct time_break tb; 
+	lightfs_tb_init(&tb);
+	lightfs_tb_check(&tb);
+#endif
 
 #ifdef CALL_TRACE
 	ftfs_error(__func__, "\n");
@@ -2203,6 +2531,10 @@ ftfs_write_inode(struct inode *inode, struct writeback_control *wbc)
 
 	ftfs_put_read_lock(FTFS_I(inode));
 
+#ifdef CALL_TRACE_TIME
+	lightfs_tb_check(&tb);
+	lightfs_tb_print(__func__, &tb);
+#endif
 no_write:
 	return ret;
 }
@@ -2213,13 +2545,18 @@ static void ftfs_evict_inode(struct inode *inode)
 	struct ftfs_sb_info *sbi = inode->i_sb->s_fs_info;
 	DBT *meta_dbt;
 	DB_TXN *txn;
+#ifdef CALL_TRACE_TIME
+	struct time_break tb; 
+	lightfs_tb_init(&tb);
+	lightfs_tb_check(&tb);
+#endif
 
 
 #ifdef CALL_TRACE
 	ftfs_error(__func__, "\n");
 #endif
 	if (inode->i_nlink || (FTFS_I(inode)->ftfs_flags & FTFS_FLAG_DELETED)) {
-		ftfs_error(__func__, "쫒겨난다\n");
+		//pr_info("쫒겨난다: %d\n", inode->i_nlink);
 		ftfs_bstore_meta_del(sbi->cache_db, &(FTFS_I(inode)->meta_dbt), NULL, 1);
 		goto no_delete;
 	}
@@ -2249,12 +2586,22 @@ no_delete:
 
 	invalidate_inode_buffers(inode);
 	clear_inode(inode);
+
+#ifdef CALL_TRACE_TIME
+	lightfs_tb_check(&tb);
+	lightfs_tb_print(__func__, &tb);
+#endif
 }
 
 // called when VFS wishes to free sb (unmount), sync southbound here
 static void ftfs_put_super(struct super_block *sb)
 {
 	struct ftfs_sb_info *sbi = sb->s_fs_info;
+#ifdef CALL_TRACE_TIME
+	struct time_break tb; 
+	lightfs_tb_init(&tb);
+	lightfs_tb_check(&tb);
+#endif
 
 #ifdef CALL_TRACE
 	ftfs_error(__func__, "\n");
@@ -2268,6 +2615,11 @@ static void ftfs_put_super(struct super_block *sb)
 
 	free_percpu(sbi->s_ftfs_info);
 	kfree(sbi);
+
+#ifdef CALL_TRACE_TIME
+	lightfs_tb_check(&tb);
+	lightfs_tb_print(__func__, &tb);
+#endif
 }
 
 static int ftfs_sync_fs(struct super_block *sb, int wait)
@@ -2283,6 +2635,11 @@ static int ftfs_sync_fs(struct super_block *sb, int wait)
 
 static int ftfs_dir_release(struct inode *inode, struct file *filp)
 {
+#ifdef CALL_TRACE_TIME
+	struct time_break tb; 
+	lightfs_tb_init(&tb);
+	lightfs_tb_check(&tb);
+#endif
 
 #ifdef CALL_TRACE
 	ftfs_error(__func__, "\n");
@@ -2292,6 +2649,10 @@ static int ftfs_dir_release(struct inode *inode, struct file *filp)
 		kfree((char *)filp->f_pos);
 	}
 
+#ifdef CALL_TRACE_TIME
+	lightfs_tb_check(&tb);
+	lightfs_tb_print(__func__, &tb);
+#endif
 	return 0;
 }
 
@@ -2303,6 +2664,7 @@ static const struct address_space_operations ftfs_aops = {
 	.write_begin		= ftfs_write_begin,
 	.write_end		= ftfs_write_end,
 	.launder_page		= ftfs_launder_page,
+	.set_page_dirty = __set_page_dirty_nobuffers,
 };
 
 /*
@@ -2389,24 +2751,44 @@ ftfs_setup_inode(struct super_block *sb, DBT *meta_dbt,
 {
 	struct inode *i;
 	struct ftfs_inode *ftfs_inode;
+#ifdef CALL_TRACE_TIME
+	struct time_break tb; 
+	lightfs_tb_init(&tb);
+	lightfs_tb_check(&tb);
+#endif
+	
 
+	//local_irq_disable();
 	if ((i = iget_locked(sb, meta->u.st.st_ino)) == NULL)
 		return ERR_PTR(-ENOMEM);
+#ifdef CALL_TRACE_TIME
+	lightfs_tb_check(&tb);
+#endif
 
 	ftfs_inode = FTFS_I(i);
 	if (!(i->i_state & I_NEW)) {
+		//pr_info("잘봐라\n");
+		ftfs_put_read_lock(ftfs_inode);
 		DBT *old_dbt = ftfs_get_write_lock(ftfs_inode);
+		//print_key(__func__, old_dbt->data, old_dbt->size);
+		//print_key(__func__, meta_dbt->data, meta_dbt->size);
 		dbt_destroy(old_dbt);
 		dbt_copy(old_dbt, meta_dbt);
 		ftfs_put_write_lock(ftfs_inode);
 		return i;
 	}
+#ifdef CALL_TRACE_TIME
+	lightfs_tb_check(&tb);
+#endif
 
 	BUG_ON(ftfs_inode->meta_dbt.data != NULL);
 	dbt_copy(&ftfs_inode->meta_dbt, meta_dbt);
 	init_rwsem(&ftfs_inode->key_lock);
 	INIT_LIST_HEAD(&ftfs_inode->rename_locked);
 	ftfs_inode->ftfs_flags = 0;
+#ifdef CALL_TRACE_TIME
+	lightfs_tb_check(&tb);
+#endif
 
 	BUG_ON(meta->type != FTFS_METADATA_TYPE_NORMAL);
 	i->i_rdev = meta->u.st.st_dev;
@@ -2428,6 +2810,9 @@ ftfs_setup_inode(struct super_block *sb, DBT *meta_dbt,
 	TIME_T_TO_TIMESPEC(i->i_atime, meta->u.st.st_atime);
 	TIME_T_TO_TIMESPEC(i->i_mtime, meta->u.st.st_mtime);
 	TIME_T_TO_TIMESPEC(i->i_ctime, meta->u.st.st_ctime);
+#ifdef CALL_TRACE_TIME
+	lightfs_tb_check(&tb);
+#endif
 
 	if (S_ISREG(i->i_mode)) {
 		/* Regular file */
@@ -2449,8 +2834,17 @@ ftfs_setup_inode(struct super_block *sb, DBT *meta_dbt,
 	} else {
 		BUG();
 	}
+#ifdef CALL_TRACE_TIME
+	lightfs_tb_check(&tb);
+#endif
 
 	unlock_new_inode(i);
+#ifdef CALL_TRACE_TIME
+	lightfs_tb_check(&tb);
+	lightfs_tb_print(__func__, &tb);
+#endif
+
+	//local_irq_enable();
 	return i;
 }
 
@@ -2471,7 +2865,7 @@ static int ftfs_fill_super(struct super_block *sb, void *data, int silent)
 
 	// FTFS specific info
 	ret = -ENOMEM;
-	sbi = kzalloc(sizeof(struct ftfs_sb_info), GFP_KERNEL);
+	sbi = kzalloc(sizeof(struct ftfs_sb_info), GFP_NOIO);
 	if (!sbi)
 		goto err;
 
@@ -2563,6 +2957,7 @@ static struct dentry *ftfs_mount(struct file_system_type *fs_type, int flags,
                                  const char *dev_name, void *data)
 {
 	return mount_bdev(fs_type, flags, dev_name, data, ftfs_fill_super);
+	//return mount_nodev(fs_type, flags, data, ftfs_fill_super);
 }
 
 static void ftfs_kill_sb(struct super_block *sb)
@@ -2586,7 +2981,7 @@ int init_ftfs_fs(void)
 	ftfs_inode_cachep =
 		kmem_cache_create("ftfs_i",
 		                  sizeof(struct ftfs_inode), 0,
-		                  SLAB_RECLAIM_ACCOUNT | SLAB_MEM_SPREAD,
+		                  SLAB_RECLAIM_ACCOUNT,
 		                  ftfs_i_init_once);
 	if (!ftfs_inode_cachep) {
 		printk(KERN_ERR "FTFS ERROR: Failed to initialize inode cache.\n");
@@ -2597,7 +2992,7 @@ int init_ftfs_fs(void)
 	ftfs_writepages_cachep =
 		kmem_cache_create("ftfs_wp",
 		                  sizeof(struct ftfs_wp_node), 0,
-		                  SLAB_RECLAIM_ACCOUNT | SLAB_MEM_SPREAD,
+		                  SLAB_RECLAIM_ACCOUNT,
 		                  NULL);
 	if (!ftfs_writepages_cachep) {
 		printk(KERN_ERR "FTFS ERROR: Failed to initialize write page vec cache.\n");

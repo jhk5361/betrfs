@@ -15,25 +15,9 @@ DEFINE_HASHTABLE (lightfs_ht_lock, HASHTABLE_BITS);
 static struct kmem_cache *ht_cache_item_cachep;
 static struct kmem_cache *meta_cachep;
 
-static int dbt_alloc_and_copy(DBT **to, const DBT *from)
-{
-	*to = kmalloc(sizeof(DBT), GFP_KERNEL);
-	if (*to == NULL) {
-		return -ENOMEM;
-	}
-	memcpy(*to, from, sizeof(DBT));
-	(*to)->data = kmalloc(from->size, GFP_KERNEL);
-	if ((*to)->data == NULL) {
-		kfree(*to);
-		*to = NULL;
-		return -ENOMEM;
-	}
-	memcpy((*to)->data, from->data, from->size);
-	return 0;
-}
 static int _dbt_copy(DBT *to, const DBT *from) {
 	memcpy(to, from, sizeof(DBT));
-	to->data = kmalloc(from->size, GFP_KERNEL);
+	to->data = kmalloc(from->size, GFP_NOIO);
 	if (to->data == NULL) {
 		return -ENOMEM;
 	}
@@ -47,7 +31,7 @@ static int _dbt_no_alloc_copy(DBT *to, const DBT *from) {
 
 static int _dbt_copy_meta(DBT *to, const DBT *from) {
 	memcpy(to, from, sizeof(DBT));
-	to->data = kmem_cache_alloc(meta_cachep, GFP_KERNEL);
+	to->data = kmem_cache_alloc(meta_cachep, GFP_NOIO);
 	if (to->data == NULL) {
 		return -ENOMEM;
 	}
@@ -128,21 +112,39 @@ static inline int lightfs_ht_cache_get (DB *db, DB_TXN *txn, DBT *key, DBT *valu
 	uint32_t fp = lightfs_ht_func(SSEED, key->data, key->size);
 
 	hash_for_each_possible(lightfs_ht_lock, ht_item, node, hkey) {
-		spin_lock(&ht_item->lock);
+		//pr_info("들어간다1 %p\n", &ht_item->lock);
+		//print_key(__func__, key->data, key->size);
+		//spin_lock_bh(&ht_item->lock);
+		//spin_lock(&ht_item->lock);
+		down_read(&ht_item->lock);
 		hash_for_each_possible(lightfs_ht_cache, cache_item, node, hkey) {
 			if (cache_item->fp == fp && !lightfs_keycmp(cache_item->key.data, cache_item->key.size, key->data, key->size)) {
-				if (cache_item->value.data == NULL) {
-					spin_unlock(&ht_item->lock);
+				if (cache_item->is_weak_del) {
+					memcpy(value->data, cache_item->value.data, value->size);
+					//spin_unlock_bh(&ht_item->lock);
+					//spin_unlock(&ht_item->lock);
+					pr_info("나간다 cache_item->is_weak_del:%d\n", cache_item->is_weak_del);
+					print_key(__func__,  cache_item->key.data, cache_item->key.size);
+					up_read(&ht_item->lock);
+					//pr_info("나간다1-1 %p\n", &ht_item->lock);
 					return DB_FOUND_FREE;
 				} else {
 					memcpy(value->data, cache_item->value.data, value->size);
-					spin_unlock(&ht_item->lock);
+					//spin_unlock_bh(&ht_item->lock);
+					//spin_unlock(&ht_item->lock);
+					up_read(&ht_item->lock);
+					//pr_info("나간다1-2 %p\n", &ht_item->lock);
+					//pr_info("나간다2\n");
 					return 0;
 				}
 			}
 		}
-		spin_unlock(&ht_item->lock);
+		up_read(&ht_item->lock);
+		//spin_unlock_bh(&ht_item->lock);
+		//spin_unlock(&ht_item->lock);
 	}
+					//pr_info("나간다3\n");
+					//pr_info("나간다1-3 %p\n", &ht_item->lock);
 	return DB_NOTFOUND;
 }
 
@@ -154,25 +156,40 @@ static inline int lightfs_ht_cache_put (DB *db, DB_TXN *txn, DBT *key, DBT *valu
 	uint32_t fp = lightfs_ht_func(SSEED, key->data, key->size);
 
 	hash_for_each_possible(lightfs_ht_lock, ht_item, node, hkey) {
-		spin_lock(&ht_item->lock);
+		//pr_info("들어간다2 %p\n", &ht_item->lock);
+		//print_key(__func__, key->data, key->size);
+		//spin_lock_bh(&ht_item->lock);
+		//spin_lock(&ht_item->lock);
+		down_write(&ht_item->lock);
 		hash_for_each_possible(lightfs_ht_cache, cache_item, node, hkey) {
 			if (cache_item->fp == fp && !lightfs_keycmp(cache_item->key.data, cache_item->key.size, key->data, key->size)) {
-				if (cache_item->value.data == NULL) {
-					_dbt_copy_meta(&cache_item->value, value);
+				if (cache_item->is_weak_del) {
+					//_dbt_copy_meta(&cache_item->value, value);
+					//_dbt_copy_meta(&cache_item->value, value);
+					_dbt_no_alloc_copy(&cache_item->value, value);
 				} else {
 					_dbt_no_alloc_copy(&cache_item->value, value);
 				}
-				spin_unlock(&ht_item->lock);
+					//pr_info("나간다2-1 %p\n", &ht_item->lock);
+				cache_item->is_weak_del = 0;
+				//spin_unlock_bh(&ht_item->lock);
+				//spin_unlock(&ht_item->lock);
+				up_write(&ht_item->lock);
 				return 0;
 			}
 		}
-		cache_item = kmem_cache_alloc(ht_cache_item_cachep, GFP_KERNEL);
+		cache_item = kmem_cache_alloc(ht_cache_item_cachep, GFP_NOIO);
 		_dbt_copy(&cache_item->key, key);
 		_dbt_copy_meta(&cache_item->value, value);
+		INIT_HLIST_NODE(&cache_item->node);
 		hash_add(lightfs_ht_cache, &cache_item->node, hkey);
 		cache_item->fp = fp;
-		spin_unlock(&ht_item->lock);
+		cache_item->is_weak_del = 0;
+		//spin_unlock_bh(&ht_item->lock);
+		//spin_unlock(&ht_item->lock);
+		up_write(&ht_item->lock);
 	}
+					//pr_info("나간다2-2 %p\n", &ht_item->lock);
 	return 0;
 }
 
@@ -185,7 +202,10 @@ static inline int lightfs_ht_cache_del (DB *db , DB_TXN *txn, DBT *key, enum lig
 	volatile bool found = 0;
 
 	hash_for_each_possible(lightfs_ht_lock, ht_item, node, hkey) {
-		spin_lock(&ht_item->lock);
+		//pr_info("들어간다3 %p\n", &ht_item->lock);
+		//spin_lock_bh(&ht_item->lock);
+		//spin_lock(&ht_item->lock);
+		down_write(&ht_item->lock);
 		hash_for_each_possible(lightfs_ht_cache, cache_item, node, hkey) {
 			if (cache_item->fp == fp && !lightfs_keycmp(cache_item->key.data, cache_item->key.size, key->data, key->size)) {
 				found = 1;
@@ -195,13 +215,16 @@ static inline int lightfs_ht_cache_del (DB *db , DB_TXN *txn, DBT *key, enum lig
 		if (found) {
 			hash_del(&cache_item->node);
 		}
-		spin_unlock(&ht_item->lock);
+		//spin_unlock_bh(&ht_item->lock);
+		//spin_unlock(&ht_item->lock);
+		up_write(&ht_item->lock);
 	}
 
 	if (!found)
 		return DB_NOTFOUND;
 
 	kfree(cache_item->key.data);
+	//if (cache_item->value.data)
 	kmem_cache_free(meta_cachep, cache_item->value.data);
 	kmem_cache_free(ht_cache_item_cachep, cache_item);
 
@@ -215,10 +238,12 @@ static inline int lightfs_ht_cache_weak_del (DB *db , DB_TXN *txn, DBT *key, enu
 	uint32_t hkey = lightfs_ht_func(FSEED, key->data, key->size);
 	uint32_t fp = lightfs_ht_func(SSEED, key->data, key->size);
 	volatile bool found = 0;
-	void *data;
 
 	hash_for_each_possible(lightfs_ht_lock, ht_item, node, hkey) {
-		spin_lock(&ht_item->lock);
+		//pr_info("들어간다1 %p\n", &ht_item->lock);
+		//spin_lock_bh(&ht_item->lock);
+		//spin_lock(&ht_item->lock);
+		down_write(&ht_item->lock);
 		hash_for_each_possible(lightfs_ht_cache, cache_item, node, hkey) {
 			if (cache_item->fp == fp && !lightfs_keycmp(cache_item->key.data, cache_item->key.size, key->data, key->size)) {
 				found = 1;
@@ -226,18 +251,15 @@ static inline int lightfs_ht_cache_weak_del (DB *db , DB_TXN *txn, DBT *key, enu
 			}
 		}
 		if (found) {
-			hash_del(&cache_item->node);
-			data = cache_item->value.data;
-			cache_item->value.data = NULL;
+			cache_item->is_weak_del = 1;
 		}
-		spin_lock(&ht_item->lock);
+		//spin_unlock_bh(&ht_item->lock);
+		//spin_unlock(&ht_item->lock);
+		up_write(&ht_item->lock);
 	}
 
 	if (!found)
 		return DB_NOTFOUND;
-
-	if (data)
-		kmem_cache_free(meta_cachep, cache_item->value.data);
 
 	return 0;
 }
@@ -252,10 +274,20 @@ static inline int lightfs_ht_cache_close(DB *db, uint32_t flag)
 #else
 	int i;
 	struct ht_lock_item *ht_item;
-	for (i = 0; i < (1 << HASHTABLE_BITS) - 1; i++) {
+	struct ht_cache_item *cache_item;
+	struct hlist_node *hnode;
+	for (i = 0; i < (1 << HASHTABLE_BITS); i++) {
 		ht_item = hlist_entry(lightfs_ht_lock[i].first, struct ht_lock_item, node);
 		hash_del(&ht_item->node);
 		kfree(ht_item);
+	}
+	for (i = 0; i < (1 << HASHTABLE_BITS); i++) {
+		hlist_for_each_entry_safe(cache_item, hnode, &lightfs_ht_cache[i], node) {
+			hlist_del(&cache_item->node);
+			kfree(cache_item->key.data);
+			kmem_cache_free(meta_cachep, cache_item->value.data);
+			kmem_cache_free(ht_cache_item_cachep, cache_item);
+		}
 	}
 	kmem_cache_destroy(meta_cachep);
 	kmem_cache_destroy(ht_cache_item_cachep);
@@ -269,7 +301,7 @@ static inline int lightfs_ht_cache_close(DB *db, uint32_t flag)
 int lightfs_cache_create(DB **db, DB_ENV *env, uint32_t flags)
 {
 #ifdef RB_CACHE
-	*db = kmalloc(sizeof(DB), GFP_KERNEL);
+	*db = kmalloc(sizeof(DB), GFP_NOIO);
 	if (*db == NULL) {
 		return -ENOMEM;
 	}
@@ -287,7 +319,7 @@ int lightfs_cache_create(DB **db, DB_ENV *env, uint32_t flags)
 	int i;
 	struct ht_lock_item *ht_item;
 
-	*db = kmalloc(sizeof(DB), GFP_KERNEL);
+	*db = kmalloc(sizeof(DB), GFP_NOIO);
 	if (*db == NULL) {
 		return -ENOMEM;
 	}
@@ -303,9 +335,10 @@ int lightfs_cache_create(DB **db, DB_ENV *env, uint32_t flags)
 
 	hash_init(lightfs_ht_cache);
 	hash_init(lightfs_ht_lock);
-	for (i = 0; i < (1 << HASHTABLE_BITS) - 1; i++) {
-		ht_item = kmalloc(sizeof(struct ht_lock_item), GFP_KERNEL);
-		spin_lock_init(&ht_item->lock);
+	for (i = 0; i < (1 << HASHTABLE_BITS); i++) {
+		ht_item = kmalloc(sizeof(struct ht_lock_item), GFP_NOIO);
+		//spin_lock_init(&ht_item->lock);
+		init_rwsem(&ht_item->lock);
 		INIT_HLIST_NODE(&ht_item->node);
 		hlist_add_head(&ht_item->node, &lightfs_ht_lock[i]);
 	}

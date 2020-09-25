@@ -530,6 +530,8 @@ enum lightfs_txn_state {
 	TXN_TRANSFERING = 16,
 	TXN_FLUSH = 32,
 	TXN_READ = 64,
+	TXN_ORDERED = 128,
+	TXN_ORDERLESS = 256,
 };
 
 enum lightfs_req_type {
@@ -550,6 +552,7 @@ enum lightfs_req_type {
 	LIGHTFS_DATA_RENAME,
 	LIGHTFS_COMMIT,
 	LIGHTFS_GET_MULTI,
+	LIGHTFS_DATA_SET_WB,
 };
 
 struct __lightfs_db_env {

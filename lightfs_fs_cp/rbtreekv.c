@@ -55,12 +55,12 @@ struct __toku_dbc_wrap {
 
 static int dbt_alloc_and_copy(DBT **to, const DBT *from)
 {
-	*to = kmalloc(sizeof(DBT), GFP_KERNEL);
+	*to = kmalloc(sizeof(DBT), GFP_NOIO);
 	if (*to == NULL) {
 		return -ENOMEM;
 	}
 	memcpy(*to, from, sizeof(DBT));
-	(*to)->data = kmalloc(from->size, GFP_KERNEL);
+	(*to)->data = kmalloc(from->size, GFP_NOIO);
 	if ((*to)->data == NULL) {
 		kfree(*to);
 		*to = NULL;
@@ -71,7 +71,7 @@ static int dbt_alloc_and_copy(DBT **to, const DBT *from)
 }
 static int _dbt_copy(DBT *to, const DBT *from) {
 	memcpy(to, from, sizeof(DBT));
-	to->data = kmalloc(from->size, GFP_KERNEL);
+	to->data = kmalloc(from->size, GFP_NOIO);
 	if (to->data == NULL) {
 		return -ENOMEM;
 	}
@@ -84,8 +84,8 @@ static int _dbt_no_alloc_copy(DBT *to, const DBT *from) {
 }
 static int _dbt_copy_meta(DBT *to, const DBT *from) {
 	memcpy(to, from, sizeof(DBT));
-	//to->data = kmalloc(from->size, GFP_KERNEL);
-	to->data = kmem_cache_alloc(rb_meta_cachep, GFP_KERNEL);
+	//to->data = kmalloc(from->size, GFP_NOIO);
+	to->data = kmem_cache_alloc(rb_meta_cachep, GFP_NOIO);
 	if (to->data == NULL) {
 		return -ENOMEM;
 	}
@@ -280,7 +280,7 @@ static void db_set_val(const DBT *new_val, void *set_extra)
 		/* replace/insert */
 		if (info->node == NULL) {
 			int ret;
-			struct rb_kv_node *new_node = kmalloc(sizeof(struct rb_kv_node), GFP_KERNEL);
+			struct rb_kv_node *new_node = kmalloc(sizeof(struct rb_kv_node), GFP_NOIO);
 			BUG_ON(new_node == NULL);
 			ret = _dbt_copy(&new_node->key, info->key);
 			BUG_ON(ret != 0);
@@ -320,7 +320,7 @@ int db_update(DB *db, DB_TXN *txnid, const DBT *key, const DBT *value, loff_t of
 		*/
 
 	} else {
-		node = kmalloc(sizeof(struct rb_kv_node), GFP_KERNEL);
+		node = kmalloc(sizeof(struct rb_kv_node), GFP_NOIO);
 		ret = _dbt_copy(&node->key, key);
 		ret = _dbt_copy(&node->val, value);
 		buf = node->val.data;
@@ -383,7 +383,7 @@ int db_put(DB *db, DB_TXN *txnid, DBT *key, DBT *data, uint32_t flags)
 		return ret;
 	}
 
-	node = kmalloc(sizeof(struct rb_kv_node), GFP_KERNEL);
+	node = kmalloc(sizeof(struct rb_kv_node), GFP_NOIO);
 
 	ret = _dbt_copy(&node->key, key);
 	BUG_ON(ret != 0);
@@ -566,7 +566,7 @@ static int dbc_c_get(DBC *c, DBT *key, DBT *value, uint32_t flags)
 
 int db_cursor(DB *db, DB_TXN *txnid, DBC **cursorp, uint32_t flags)
 {
-	struct __toku_dbc_wrap *wrap = kmalloc(sizeof(struct __toku_dbc_wrap), GFP_KERNEL);
+	struct __toku_dbc_wrap *wrap = kmalloc(sizeof(struct __toku_dbc_wrap), GFP_NOIO);
 	if (wrap == NULL) {
 		return -ENOMEM;
 	}
@@ -589,7 +589,7 @@ int db_cursor(DB *db, DB_TXN *txnid, DBC **cursorp, uint32_t flags)
 
 int db_env_create(DB_ENV **envp, uint32_t flags)
 {
-	(*envp)->i = kmalloc(sizeof(struct __toku_db_env_internal), GFP_KERNEL);
+	(*envp)->i = kmalloc(sizeof(struct __toku_db_env_internal), GFP_NOIO);
 	if ((*envp)->i == NULL) {
 		kfree(*envp);
 		return -ENOMEM;
@@ -604,7 +604,7 @@ int db_env_create(DB_ENV **envp, uint32_t flags)
 
 int db_create(DB **db, DB_ENV *env, uint32_t flags)
 {
-	(*db)->i = kmalloc(sizeof(struct __toku_db_internal), GFP_KERNEL);
+	(*db)->i = kmalloc(sizeof(struct __toku_db_internal), GFP_NOIO);
 	if ((*db)->i == NULL) {
 		kfree(*db);
 		return -ENOMEM;
@@ -699,7 +699,6 @@ static int rb_kv_insert_cache(DB *db, struct rb_cache_kv_node *node)
 int db_cache_get(DB *db, DB_TXN *txnid, DBT *key, DBT *value, uint32_t flags)
 {
 	struct rb_cache_kv_node *node;
-	unsigned long irqflags;
 	static int eviction_cnt = 0, hit_cnt = 0;
 	//print_key(__func__, key->data, key->size); 
 
@@ -743,7 +742,6 @@ int db_cache_get(DB *db, DB_TXN *txnid, DBT *key, DBT *value, uint32_t flags)
 int db_cache_del(DB *db, DB_TXN *txnid, DBT *key, uint32_t flags)
 {
 	struct rb_cache_kv_node *node;
-	unsigned long irqflags;
 	//print_key(__func__, key->data, key->size); 
 #ifdef RB_LOCK
 	down_write(&rb_sem);
@@ -781,7 +779,6 @@ int db_cache_del(DB *db, DB_TXN *txnid, DBT *key, uint32_t flags)
 int db_cache_weak_del(DB *db, DB_TXN *txnid, DBT *key, uint32_t flags)
 {
 	struct rb_cache_kv_node *node;
-	unsigned long irqflags;
 	void *data;
 	static int cnt = 0;
 	ftfs_error(__func__, "eviction cnt: %d\n", ++cnt);
@@ -824,7 +821,6 @@ int db_cache_put(DB *db, DB_TXN *txnid, DBT *key, DBT *value, uint32_t flags)
 	/* flags are not used in ftfs */
 	struct rb_cache_kv_node *node;
 	int ret;
-	unsigned long irqflags;
 
 	//print_key(__func__, key->data, key->size); 
 #ifdef RB_LOCK
@@ -851,8 +847,8 @@ int db_cache_put(DB *db, DB_TXN *txnid, DBT *key, DBT *value, uint32_t flags)
 		return 0;
 	}
 
-	//node = kmalloc(sizeof(struct rb_cache_kv_node), GFP_KERNEL);
-	node = kmem_cache_alloc(rb_kv_cachep, GFP_KERNEL);
+	//node = kmalloc(sizeof(struct rb_cache_kv_node), GFP_NOIO);
+	node = kmem_cache_alloc(rb_kv_cachep, GFP_NOIO);
 	ret = _dbt_copy(&node->key, key);
 	//BUG_ON(ret != 0);
 	ret = _dbt_copy_meta(&node->value, value);
@@ -896,7 +892,7 @@ int db_cache_close(DB *db, uint32_t flag)
 
 int db_cache_create(DB **db, DB_ENV *env, uint32_t flags)
 {
-	(*db)->i = kmalloc(sizeof(struct __toku_db_internal), GFP_KERNEL);
+	(*db)->i = kmalloc(sizeof(struct __toku_db_internal), GFP_NOIO);
 	if ((*db)->i == NULL) {
 		kfree(*db);
 		return -ENOMEM;

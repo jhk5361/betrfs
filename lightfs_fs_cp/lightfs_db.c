@@ -47,7 +47,7 @@ int lightfs_db_update(DB *db, DB_TXN *txn, const DBT *key, const DBT *value, lof
 
 int lightfs_db_del (DB *db , DB_TXN *txn, DBT *key, enum lightfs_req_type type)
 {
-	return lightfs_bstore_txn_insert(db, txn, key, NULL, 0, type);
+	return lightfs_bstore_txn_insert(db, txn, key, NULL, 1, type);
 }
 
 #ifdef PINK
@@ -100,7 +100,7 @@ int lightfs_db_change_descriptor (DB *db, DB_TXN *txn, const DBT *descriptor, ui
 
 int lightfs_db_create(DB **db, DB_ENV *env, uint32_t flags)
 {
-	*db = kmalloc(sizeof(DB), GFP_KERNEL);
+	*db = kmalloc(sizeof(DB), GFP_NOIO);
 	if (*db == NULL) {
 		return -ENOMEM;
 	}

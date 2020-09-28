@@ -34,6 +34,4 @@ static inline void ftfs_log(const char * function, const char * fmt, ...)
 }
 
 
-
-
 #endif

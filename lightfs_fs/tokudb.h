@@ -530,6 +530,8 @@ enum lightfs_txn_state {
 	TXN_TRANSFERING = 16,
 	TXN_FLUSH = 32,
 	TXN_READ = 64,
+	TXN_ORDERED = 128,
+	TXN_ORDERLESS = 256,
 };
 
 enum lightfs_req_type {
@@ -550,6 +552,9 @@ enum lightfs_req_type {
 	LIGHTFS_DATA_RENAME,
 	LIGHTFS_COMMIT,
 	LIGHTFS_GET_MULTI,
+	LIGHTFS_DATA_SET_WB,
+	LIGHTFS_GET_MULTI_REAL,
+	LIGHTFS_DEL_MULTI_REAL,
 };
 
 struct __lightfs_db_env {
@@ -718,6 +723,16 @@ struct __lightfs_db_txn {
 	enum lightfs_txn_state state;
 	struct list_head txn_list;
 	struct list_head txn_buf_list;
+#ifdef TXN_TIME_CHECK
+	bool is_inserted;
+	ktime_t create;
+	ktime_t begin;
+	ktime_t wakeup;
+	ktime_t first_insert;
+	ktime_t last_insert;
+	ktime_t commit;
+	ktime_t free;
+#endif
 };
 
 struct __lightfs_dbt {

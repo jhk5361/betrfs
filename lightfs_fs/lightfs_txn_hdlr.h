@@ -16,7 +16,7 @@
 
 static inline void txn_hdlr_alloc(struct __lightfs_txn_hdlr **__txn_hdlr)
 {
-	struct __lightfs_txn_hdlr *_txn_hdlr = (struct __lightfs_txn_hdlr *)kmalloc(sizeof(struct __lightfs_txn_hdlr), GFP_KERNEL);
+	struct __lightfs_txn_hdlr *_txn_hdlr = (struct __lightfs_txn_hdlr *)kmalloc(sizeof(struct __lightfs_txn_hdlr), GFP_NOIO);
 
 	_txn_hdlr->txn_id = 1;
 	_txn_hdlr->running_c_txn_id = 0;
@@ -35,7 +35,7 @@ static inline void txn_hdlr_alloc(struct __lightfs_txn_hdlr **__txn_hdlr)
 	spin_lock_init(&_txn_hdlr->txn_spin);
 	spin_lock_init(&_txn_hdlr->ordered_c_txn_spin);
 	spin_lock_init(&_txn_hdlr->orderless_c_txn_spin);
-	spin_lock_init(&_txn_hdlr->committed_c_txn_spin);
+	spin_lock_init(&_txn_hdlr->c_txn_spin);
 	spin_lock_init(&_txn_hdlr->running_c_txn_spin);
 	_txn_hdlr->state = false;
 	_txn_hdlr->contention = false;
@@ -43,13 +43,14 @@ static inline void txn_hdlr_alloc(struct __lightfs_txn_hdlr **__txn_hdlr)
 	_txn_hdlr->txn_buffer = RB_ROOT;
 	init_rwsem(&_txn_hdlr->txn_buffer_sem);
 	spin_lock_init(&_txn_hdlr->txn_buffer_spin);
+	_txn_hdlr->current_workq_id = 0;
 	*__txn_hdlr = _txn_hdlr;
 	
 }
 
 static inline void c_txn_list_alloc(DB_C_TXN_LIST **c_txn_list, DB_C_TXN *c_txn)
 {
-	*c_txn_list = kmalloc(sizeof(DB_C_TXN_LIST), GFP_KERNEL);
+	*c_txn_list = kmalloc(sizeof(DB_C_TXN_LIST), GFP_NOIO);
 	(*c_txn_list)->c_txn_ptr = c_txn;
 	INIT_LIST_HEAD(&((*c_txn_list)->c_txn_list));
 }
@@ -96,13 +97,13 @@ static inline void txn_buf_setup_cpy(DB_TXN_BUF *txn_buf, const void *data, uint
 	char *data_buf = (char *)data;
 	txn_buf->off = off;
 	txn_buf->len = size;
-	memcpy(txn_buf->buf+off, data_buf, size);
+	memcpy(txn_buf->buf+off, data_buf, size); // TMP
 	txn_buf->type = type;
 }
 
-static inline void alloc_txn_buf_key_from_dbt(DB_TXN_BUF *txn_buf, DBT *dbt)
+static inline void alloc_txn_buf_key_from_dbt(DB_TXN_BUF *txn_buf, const DBT *dbt)
 {
-	txn_buf->key = kmalloc(dbt->size, GFP_KERNEL);
+	txn_buf->key = kmalloc(dbt->size, GFP_NOIO);
 	memcpy(txn_buf->key, dbt->data, dbt->size);
 	txn_buf->key_len = dbt->size;
 }
@@ -146,7 +147,7 @@ static inline uint16_t dbc_get_size(DBC *dbc)
 //int lightfs_bstore_txn_abort(DB_TXN *);
 int lightfs_txn_hdlr_init(void);
 int lightfs_txn_hdlr_destroy(void);
-int lightfs_bstore_txn_insert(DB *, DB_TXN *, DBT *, DBT *, uint32_t, enum lightfs_req_type);
+int lightfs_bstore_txn_insert(DB *, DB_TXN *, const DBT *, const DBT *, uint32_t, enum lightfs_req_type);
 int lightfs_bstore_txn_get(DB *, DB_TXN *, DBT *, DBT *, uint32_t, enum lightfs_req_type);
 int lightfs_bstore_txn_get_multi(DB *, DB_TXN *, DBT *, uint32_t, YDB_CALLBACK_FUNCTION, void *, enum lightfs_req_type);
 int lightfs_bstore_txn_sync_put(DB *, DB_TXN *, DBT *, DBT *, uint32_t, enum lightfs_req_type);

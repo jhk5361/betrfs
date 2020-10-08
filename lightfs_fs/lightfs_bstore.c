@@ -929,8 +929,8 @@ int ftfs_bstore_trunc(DB *data_db, DBT *meta_dbt,
 		return ret;
 	}
 
-	print_key(__func__, min_data_key_dbt.data, min_data_key_dbt.size);
-	pr_info("last block num: %d, current block_num: %d\n", last_block_num, current_block_num);
+	//print_key(__func__, min_data_key_dbt.data, min_data_key_dbt.size);
+	//pr_info("last block num: %d, current block_num: %d\n", last_block_num, current_block_num);
 	total_block_num = last_block_num - current_block_num + 1;
 
 	//ret = data_db->del_multi(data_db, txn,
@@ -1154,20 +1154,22 @@ int ftfs_bstore_scan_pages(DB *data_db, DBT *meta_dbt, DB_TXN *txn, struct ftio 
 
 	BUG_ON(r);
 #else
-	if (block_cnt == 1) {
-		buf = kmap_atomic(page);
-		ret = ftfs_bstore_get(data_db, &data_dbt, txn, buf, inode);
-		if (ret == -ENOENT) {
-			memset(buf, 0, FTFS_BSTORE_BLOCKSIZE);
-			ret = 0;
-		}
-		kunmap_atomic(buf);
-		if (!(ftio_current_page(ftio) == ftio_last_page(ftio))) {
-			ftfs_error(__func__, "한개만 보낸다.\n");
-			ftio_advance_page(ftio);
-			ftfs_bstore_fill_rest_page(ftio);
-		} else {
-			ftio_advance_page(ftio);
+	if (block_cnt < 5) {
+		while(block_cnt--) {
+			buf = kmap_atomic(page);
+			ret = ftfs_bstore_get(data_db, &data_dbt, txn, buf, inode);
+			if (ret == -ENOENT) {
+				memset(buf, 0, FTFS_BSTORE_BLOCKSIZE);
+				ret = 0;
+			}
+			kunmap_atomic(buf);
+			if (!(ftio_current_page(ftio) == ftio_last_page(ftio))) {
+				//ftfs_error(__func__, "한개만 보낸다.\n");
+				ftio_advance_page(ftio);
+				ftfs_bstore_fill_rest_page(ftio);
+			} else {
+				ftio_advance_page(ftio);
+			}
 		}
 	} else {
 		ret = data_db->cursor(data_db, txn, &cursor, LIGHTFS_DATA_CURSOR);

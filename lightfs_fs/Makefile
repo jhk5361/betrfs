@@ -10,11 +10,11 @@ obj-m += ftfs.o
 KBUILD_CFLAGS +=  -I./cheeze \
 				  -DLIGHTFS \
 				  -DRB_LOCK \
-				  -DGET_MULTI \
 				  -DPINK \
 				  -DSUPER_NOLOCK \
 				  -DWB \
 				  -DMONITOR \
+				  -DGET_MULTI \
 #				  -DFTFS_DEBUG \
 #				  -DTIME_CHECK \
 #				  -DTXN_BUFFER \

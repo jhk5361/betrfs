@@ -555,6 +555,7 @@ enum lightfs_req_type {
 	LIGHTFS_DATA_SET_WB,
 	LIGHTFS_GET_MULTI_REAL,
 	LIGHTFS_DEL_MULTI_REAL,
+	LIGHTFS_TXN_TRANSFER,
 };
 
 struct __lightfs_db_env {

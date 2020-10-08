@@ -117,8 +117,14 @@ int rb_io_close (DB_IO *db_io)
 int lightfs_io_get (DB *db, DB_TXN_BUF *txn_buf)
 {
 	int buf_idx = 0;
-	char *buf = kmem_cache_alloc(lightfs_io_small_buf_cachep, GFP_NOIO);
+	//char *buf = kmem_cache_alloc(lightfs_io_small_buf_cachep, GFP_KERNEL);
+	char *buf;
+	uint64_t io_seq;
 	struct cheeze_req_user req;
+
+	io_seq = cheeze_prepare_io(&req, 1);
+	buf = req.buf;
+	
 
 
 #ifdef TIME_CHECK
@@ -138,8 +144,9 @@ int lightfs_io_get (DB *db, DB_TXN_BUF *txn_buf)
 	// need memcpy
 	// not found
 	//print_key(__func__, txn_buf->key, txn_buf->key_len);
+	ftfs_error(__func__, "buf: %p, len: %d\n", txn_buf->buf, txn_buf->len);
 	lightfs_io_set_cheeze_req(&req, buf_idx, buf, txn_buf->buf, txn_buf->len);
-	cheeze_io(&req, NULL, NULL);
+	cheeze_io(&req, NULL, NULL, io_seq);
 
 	if (req.ubuf_len == 0) {
 		txn_buf->ret = DB_NOTFOUND;
@@ -147,7 +154,7 @@ int lightfs_io_get (DB *db, DB_TXN_BUF *txn_buf)
 		txn_buf->ret = req.ubuf_len;
 	}
 
-	kmem_cache_free(lightfs_io_small_buf_cachep, buf);
+	//kmem_cache_free(lightfs_io_small_buf_cachep, buf);
 #ifdef TIME_CHECK
 	lightfs_get_time(&txn_buf->complete);
 #endif
@@ -161,8 +168,13 @@ int lightfs_io_get (DB *db, DB_TXN_BUF *txn_buf)
 int lightfs_io_sync_put (DB *db, DB_TXN_BUF *txn_buf)
 {
 	int buf_idx = 0;
-	char *buf = kmem_cache_alloc(lightfs_io_small_buf_cachep, GFP_NOIO);
+	//char *buf = kmem_cache_alloc(lightfs_io_small_buf_cachep, GFP_KERNEL);
+	char *buf;
+	uint64_t io_seq;
 	struct cheeze_req_user req;
+
+	io_seq = cheeze_prepare_io(&req, 1);
+	buf = req.buf;
 
 
 #ifdef TIME_CHECK
@@ -181,9 +193,9 @@ int lightfs_io_sync_put (DB *db, DB_TXN_BUF *txn_buf)
 	// cheeze sync
 	//lightfs_io_set_cheeze_req(&req, buf_idx, buf, txn_buf->buf);
 	lightfs_io_set_cheeze_req(&req, buf_idx, buf, NULL, 0);
-	cheeze_io(&req, NULL, NULL);
+	cheeze_io(&req, NULL, NULL, io_seq);
 
-	kmem_cache_free(lightfs_io_small_buf_cachep, buf);
+	//kmem_cache_free(lightfs_io_small_buf_cachep, buf);
 
 #ifdef CHEEZE
 	rb_io_sync_put(db, txn_buf);
@@ -199,7 +211,12 @@ int lightfs_io_iter (DB *db, DBC *dbc, DB_TXN_BUF *txn_buf)
 {
 	int buf_idx = 0;
 	char *buf;
+	uint64_t io_seq;
 	struct cheeze_req_user req;
+
+	io_seq = cheeze_prepare_io(&req, 1);
+	buf = req.buf;
+	//buf = kmem_cache_alloc(lightfs_io_small_buf_cachep, GFP_KERNEL);
 
 #ifdef TIME_CHECK
 	lightfs_get_time(&txn_buf->transfer);
@@ -210,7 +227,6 @@ int lightfs_io_iter (DB *db, DBC *dbc, DB_TXN_BUF *txn_buf)
 	atomic64_inc(&db_io_XXX->mon.ops_num[txn_buf->type]);
 #endif
 
-	buf = kmem_cache_alloc(lightfs_io_small_buf_cachep, GFP_NOIO);
 
 	buf_idx = lightfs_io_set_txn_id(buf, txn_buf->txn_id, buf_idx);
 	buf_idx = lightfs_io_set_cnt(buf + buf_idx, 1, buf_idx);
@@ -223,7 +239,7 @@ int lightfs_io_iter (DB *db, DBC *dbc, DB_TXN_BUF *txn_buf)
 	// msleep_interruptible(20);
 	//ftfs_error(__func__, "iter\n");
 	lightfs_io_set_cheeze_req(&req, buf_idx, buf, txn_buf->buf, 0);
-	cheeze_io(&req, NULL, NULL);
+	cheeze_io(&req, NULL, NULL, io_seq);
 	
 	//ftfs_error(__func__, "buf: %px\n len: %d\n, ubuf: %px\n, ubuf_len: %d\n", req.buf, req.buf_len, req.ubuf, req.ubuf_len);
 	if (req.ubuf_len == 2) {
@@ -234,7 +250,7 @@ int lightfs_io_iter (DB *db, DBC *dbc, DB_TXN_BUF *txn_buf)
 		//ftfs_error(__func__, "FOUND %d\n", txn_buf->ret);
 	}
 
-	kmem_cache_free(lightfs_io_small_buf_cachep, buf);
+	//kmem_cache_free(lightfs_io_small_buf_cachep, buf);
 #ifdef TIME_CHECK
 	lightfs_get_time(&txn_buf->complete);
 #endif
@@ -253,10 +269,19 @@ int lightfs_io_transfer (DB *db, DB_C_TXN *c_txn, void *(*cb)(void *data), void 
 	static uint64_t d_cnt = 0, md_cnt;
 	struct page *page;
 	void *page_buf;
+	uint64_t io_seq;
 	//ftfs_error(__func__, "%p\n", lightfs_io_large_buf_cachep);
-	buf = kmem_cache_alloc(lightfs_io_large_buf_cachep, GFP_NOIO);
+	//buf = kmem_cache_alloc(lightfs_io_large_buf_cachep, GFP_KERNEL);
 	//ftfs_error(__func__, "%p\n", lightfs_io_large_buf_cachep);
 	//buf = large_buf;
+	
+#ifdef MONITOR
+	atomic64_inc(&db_io_XXX->mon.ops_num[LIGHTFS_TXN_TRANSFER]);
+#endif
+
+
+	io_seq = cheeze_prepare_io(&req, 1);
+	buf = req.buf;
 
 	buf_idx = lightfs_io_set_txn_id(buf, c_txn->txn_id, buf_idx);
 	buf_idx += 2;
@@ -328,11 +353,11 @@ int lightfs_io_transfer (DB *db, DB_C_TXN *c_txn, void *(*cb)(void *data), void 
 		}
 	}
 	lightfs_io_set_cnt(buf + sizeof(uint32_t), cnt, 0); // trickty..
-	ftfs_error(__func__, "Delete cnt: %llu, MDelete cnt: %llu\n", d_cnt, md_cnt);
+	//ftfs_error(__func__, "Delete cnt: %llu, MDelete cnt: %llu\n", d_cnt, md_cnt);
 
 	//cheeze_write
 	lightfs_io_set_cheeze_req(&req, buf_idx, buf, NULL, 0);
-	cheeze_io(&req, cb, extra);
+	cheeze_io(&req, cb, extra, io_seq);
 
 #ifdef TIME_CHECK
 	list_for_each_entry(txn, &c_txn->txn_list, txn_list) {
@@ -344,7 +369,7 @@ int lightfs_io_transfer (DB *db, DB_C_TXN *c_txn, void *(*cb)(void *data), void 
 #endif
 
 
-	kmem_cache_free(lightfs_io_large_buf_cachep, buf);
+	//kmem_cache_free(lightfs_io_large_buf_cachep, buf);
 #ifdef CHEEZE
 	rb_io_transfer(db, c_txn);
 #endif
@@ -357,8 +382,13 @@ int lightfs_io_transfer (DB *db, DB_C_TXN *c_txn, void *(*cb)(void *data), void 
 int lightfs_io_commit (DB_TXN_BUF *txn_buf)
 {
 	int buf_idx = 0;
-	char *buf = kmem_cache_alloc(lightfs_io_small_buf_cachep, GFP_NOIO);
+	//char *buf = kmem_cache_alloc(lightfs_io_small_buf_cachep, GFP_KERNEL);
+	char *buf;
+	uint64_t io_seq;
 	struct cheeze_req_user req;
+
+	io_seq = cheeze_prepare_io(&req, 1);
+	buf = req.buf;
 
 
 #ifdef TIME_CHECK
@@ -379,10 +409,10 @@ int lightfs_io_commit (DB_TXN_BUF *txn_buf)
 	//ftfs_error(__func__, "보낸다\n");
 	lightfs_io_set_cheeze_req(&req, buf_idx, buf, buf, 0); // last 'buf' is tricky
 	//lightfs_io_set_cheeze_req(&req, buf_idx, buf, NULL, 0); // last 'buf' is tricky
-	cheeze_io(&req, NULL, NULL);
+	cheeze_io(&req, NULL, NULL, io_seq);
 	//ftfs_error(__func__, "%s\n", buf);
 
-	kmem_cache_free(lightfs_io_small_buf_cachep, buf);
+	//kmem_cache_free(lightfs_io_small_buf_cachep, buf);
 #ifdef TIME_CHECK
 	lightfs_get_time(&txn_buf->complete);
 #endif
@@ -393,8 +423,13 @@ int lightfs_io_commit (DB_TXN_BUF *txn_buf)
 int lightfs_io_get_multi (DB *db, DB_TXN_BUF *txn_buf)
 {
 	int buf_idx = 0;
-	char *buf = kmem_cache_alloc(lightfs_io_small_buf_cachep, GFP_NOIO);
+	//char *buf = kmem_cache_alloc(lightfs_io_small_buf_cachep, GFP_KERNEL);
 	struct cheeze_req_user req;
+	char *buf;
+	uint64_t io_seq;
+
+	io_seq = cheeze_prepare_io(&req, 1);
+	buf = req.buf;
 
 
 #ifdef TIME_CHECK
@@ -417,7 +452,7 @@ int lightfs_io_get_multi (DB *db, DB_TXN_BUF *txn_buf)
 	// not found
 	//print_key(__func__, txn_buf->key, txn_buf->key_len);
 	lightfs_io_set_cheeze_req(&req, buf_idx, buf, txn_buf->buf, 0);
-	cheeze_io(&req, NULL, NULL);
+	cheeze_io(&req, NULL, NULL, io_seq);
 
 	if (req.ubuf_len == 0) {
 		txn_buf->ret = DB_NOTFOUND;
@@ -425,7 +460,7 @@ int lightfs_io_get_multi (DB *db, DB_TXN_BUF *txn_buf)
 		txn_buf->ret = req.ubuf_len;
 	}
 
-	kmem_cache_free(lightfs_io_small_buf_cachep, buf);
+	//kmem_cache_free(lightfs_io_small_buf_cachep, buf);
 #ifdef TIME_CHECK
 	lightfs_get_time(&txn_buf->complete);
 #endif
@@ -463,14 +498,18 @@ int lightfs_io_close (DB_IO *db_io)
 	cmds.name[LIGHTFS_DATA_SET_WB] = "LIGHTFS_DATA_SET_WB";
 	cmds.name[LIGHTFS_GET_MULTI_REAL] = "LIGHTFS_GET_MULTI_REAL";
 	cmds.name[LIGHTFS_DEL_MULTI_REAL] = "LIGHTFS_DEL_MULTI_REAL";
+	cmds.name[LIGHTFS_TXN_TRANSFER] = "LIGHTFS_TXN_TRANSFER";
 	cheeze_exit();
 	kfree(db_io);
+	/*
 	kmem_cache_destroy(lightfs_io_small_buf_cachep);
 	kmem_cache_destroy(lightfs_io_large_buf_cachep);
+	*/
 	//kvfree(large_buf);
 
 #ifdef MONITOR
 	pr_info("=== LIGHTFS IO SUMMARY ===\n \
+			[%30s]: %ld\n \
 			[%30s]: %ld\n \
 			[%30s]: %ld\n \
 			[%30s]: %ld\n \
@@ -510,6 +549,7 @@ int lightfs_io_close (DB_IO *db_io)
 			, cmds.name[LIGHTFS_COMMIT], atomic64_read(&db_io_XXX->mon.ops_num[LIGHTFS_COMMIT])
 			, cmds.name[LIGHTFS_GET_MULTI], atomic64_read(&db_io_XXX->mon.ops_num[LIGHTFS_GET_MULTI])
 			, cmds.name[LIGHTFS_DATA_SET_WB], atomic64_read(&db_io_XXX->mon.ops_num[LIGHTFS_DATA_SET_WB])
+			, cmds.name[LIGHTFS_TXN_TRANSFER], atomic64_read(&db_io_XXX->mon.ops_num[LIGHTFS_TXN_TRANSFER])
 			, cmds.name[LIGHTFS_GET_MULTI_REAL], atomic64_read(&db_io_XXX->mon.ops_num[LIGHTFS_GET_MULTI_REAL])
 			, cmds.name[LIGHTFS_DEL_MULTI_REAL], atomic64_read(&db_io_XXX->mon.ops_num[LIGHTFS_DEL_MULTI_REAL])	);
 #endif
@@ -519,15 +559,16 @@ int lightfs_io_close (DB_IO *db_io)
 
 int lightfs_io_create (DB_IO **db_io) {
 	int ret, i;
-	(*db_io) = (DB_IO *)kmalloc(sizeof(DB_IO), GFP_NOIO);
+	(*db_io) = (DB_IO *)kmalloc(sizeof(DB_IO), GFP_KERNEL);
 
+	/*
 	lightfs_io_large_buf_cachep = kmem_cache_create("lightfs_c_txn_large", LIGHTFS_IO_LARGE_BUF, 0, KMEM_CACHE_FLAG, NULL);
 	if (!lightfs_io_large_buf_cachep) {
 		printk(KERN_ERR "LIGHTFS ERROR: Failed to initialize c txn cache.\n");
 		ret = -ENOMEM;
 		goto out_free_io_large_buf_cachep;
 	}
-	//large_buf = (char *)kmalloc(LIGHTFS_IO_LARGE_BUF, GFP_NOIO);
+	//large_buf = (char *)kmalloc(LIGHTFS_IO_LARGE_BUF, GFP_KERNEL);
 	//ftfs_error(__func__, "%p\n", lightfs_io_large_buf_cachep);
 
 	lightfs_io_small_buf_cachep = kmem_cache_create("lightfs_c_txn_small", LIGHTFS_IO_SMALL_BUF, 0, KMEM_CACHE_FLAG, NULL);
@@ -536,6 +577,7 @@ int lightfs_io_create (DB_IO **db_io) {
 		ret = -ENOMEM;
 		goto out_free_io_small_buf_cachep;
 	}
+	*/
 
 #ifdef EMULATION
 	(*db_io)->get = rb_io_get;
@@ -565,12 +607,13 @@ int lightfs_io_create (DB_IO **db_io) {
 	db_io_XXX = *db_io;
 
 	return 0;
-
+	/*
 out_free_io_small_buf_cachep:
 	kmem_cache_destroy(lightfs_io_small_buf_cachep);
 out_free_io_large_buf_cachep:
 	kmem_cache_destroy(lightfs_io_large_buf_cachep);
 
 	return 0;
+	*/
 }
 

@@ -32,7 +32,7 @@
 #define INODE_SIZE 152
 #define HASHTABLE_BITS 20
 #define CONCURRENT_CNT 2
-#define OPS_CNT 20
+#define OPS_CNT 30
 
 
 

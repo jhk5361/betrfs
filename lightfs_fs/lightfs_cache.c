@@ -123,8 +123,6 @@ static inline int lightfs_ht_cache_get (DB *db, DB_TXN *txn, DBT *key, DBT *valu
 					memcpy(value->data, cache_item->value.data, value->size);
 					//spin_unlock_bh(&ht_item->lock);
 					//spin_unlock(&ht_item->lock);
-					pr_info("나간다 cache_item->is_weak_del:%d\n", cache_item->is_weak_del);
-					print_key(__func__,  cache_item->key.data, cache_item->key.size);
 					up_read(&ht_item->lock);
 					//pr_info("나간다1-1 %p\n", &ht_item->lock);
 					return DB_FOUND_FREE;

@@ -12,9 +12,9 @@ KBUILD_CFLAGS +=  -I./cheeze \
 				  -DRB_LOCK \
 				  -DPINK \
 				  -DSUPER_NOLOCK \
-				  -DWB \
 				  -DMONITOR \
 				  -DGET_MULTI \
+#				  -DWB \
 #				  -DFTFS_DEBUG \
 #				  -DTIME_CHECK \
 #				  -DTXN_BUFFER \

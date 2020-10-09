@@ -17,7 +17,7 @@ static struct kmem_cache *meta_cachep;
 
 static int _dbt_copy(DBT *to, const DBT *from) {
 	memcpy(to, from, sizeof(DBT));
-	to->data = kmalloc(from->size, GFP_NOIO);
+	to->data = kmalloc(from->size, GFP_ATOMIC);
 	if (to->data == NULL) {
 		return -ENOMEM;
 	}
@@ -31,7 +31,7 @@ static int _dbt_no_alloc_copy(DBT *to, const DBT *from) {
 
 static int _dbt_copy_meta(DBT *to, const DBT *from) {
 	memcpy(to, from, sizeof(DBT));
-	to->data = kmem_cache_alloc(meta_cachep, GFP_NOIO);
+	to->data = kmem_cache_alloc(meta_cachep, GFP_ATOMIC);
 	if (to->data == NULL) {
 		return -ENOMEM;
 	}
@@ -176,7 +176,7 @@ static inline int lightfs_ht_cache_put (DB *db, DB_TXN *txn, DBT *key, DBT *valu
 				return 0;
 			}
 		}
-		cache_item = kmem_cache_alloc(ht_cache_item_cachep, GFP_NOIO);
+		cache_item = kmem_cache_alloc(ht_cache_item_cachep, GFP_ATOMIC);
 		_dbt_copy(&cache_item->key, key);
 		_dbt_copy_meta(&cache_item->value, value);
 		INIT_HLIST_NODE(&cache_item->node);

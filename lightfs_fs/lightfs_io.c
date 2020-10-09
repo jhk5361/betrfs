@@ -144,7 +144,7 @@ int lightfs_io_get (DB *db, DB_TXN_BUF *txn_buf)
 	// need memcpy
 	// not found
 	//print_key(__func__, txn_buf->key, txn_buf->key_len);
-	ftfs_error(__func__, "buf: %p, len: %d\n", txn_buf->buf, txn_buf->len);
+	//ftfs_error(__func__, "buf: %p, len: %d\n", txn_buf->buf, txn_buf->len);
 	lightfs_io_set_cheeze_req(&req, buf_idx, buf, txn_buf->buf, txn_buf->len);
 	cheeze_io(&req, NULL, NULL, io_seq);
 
@@ -152,6 +152,8 @@ int lightfs_io_get (DB *db, DB_TXN_BUF *txn_buf)
 		txn_buf->ret = DB_NOTFOUND;
 	} else {
 		txn_buf->ret = req.ubuf_len;
+		memcpy(txn_buf->buf, buf, req.ubuf_len);
+		//txn_buf->buf = buf;
 	}
 
 	//kmem_cache_free(lightfs_io_small_buf_cachep, buf);
@@ -162,6 +164,7 @@ int lightfs_io_get (DB *db, DB_TXN_BUF *txn_buf)
 #ifdef CHEEZE
 	return rb_io_get(db, txn_buf);
 #endif
+	cheeze_free_io(req.id);
 	return 0;
 }
 
@@ -204,6 +207,7 @@ int lightfs_io_sync_put (DB *db, DB_TXN_BUF *txn_buf)
 	lightfs_get_time(&txn_buf->complete);
 #endif
 
+	cheeze_free_io(req.id);
 	return 0;
 }
 
@@ -247,6 +251,7 @@ int lightfs_io_iter (DB *db, DBC *dbc, DB_TXN_BUF *txn_buf)
 		txn_buf->ret = DB_NOTFOUND;
 	} else {
 		txn_buf->ret = req.ubuf_len;
+		memcpy(txn_buf->buf, buf, req.ubuf_len);
 		//ftfs_error(__func__, "FOUND %d\n", txn_buf->ret);
 	}
 
@@ -254,6 +259,8 @@ int lightfs_io_iter (DB *db, DBC *dbc, DB_TXN_BUF *txn_buf)
 #ifdef TIME_CHECK
 	lightfs_get_time(&txn_buf->complete);
 #endif
+
+	cheeze_free_io(req.id);
 
 	return 0;
 }
@@ -375,6 +382,7 @@ int lightfs_io_transfer (DB *db, DB_C_TXN *c_txn, void *(*cb)(void *data), void 
 #endif
 
 
+	cheeze_free_io(req.id);
 
 	return 0;
 }
@@ -416,6 +424,7 @@ int lightfs_io_commit (DB_TXN_BUF *txn_buf)
 #ifdef TIME_CHECK
 	lightfs_get_time(&txn_buf->complete);
 #endif
+	cheeze_free_io(req.id);
 
 	return 0;
 }
@@ -451,13 +460,16 @@ int lightfs_io_get_multi (DB *db, DB_TXN_BUF *txn_buf)
 	// need memcpy
 	// not found
 	//print_key(__func__, txn_buf->key, txn_buf->key_len);
+	txn_buf->buf = buf;
+
 	lightfs_io_set_cheeze_req(&req, buf_idx, buf, txn_buf->buf, 0);
 	cheeze_io(&req, NULL, NULL, io_seq);
 
 	if (req.ubuf_len == 0) {
 		txn_buf->ret = DB_NOTFOUND;
+		cheeze_free_io(req.id);
 	} else {
-		txn_buf->ret = req.ubuf_len;
+		txn_buf->ret = req.id;
 	}
 
 	//kmem_cache_free(lightfs_io_small_buf_cachep, buf);

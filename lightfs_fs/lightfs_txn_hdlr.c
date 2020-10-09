@@ -351,7 +351,8 @@ int lightfs_bstore_txn_get(DB *db, DB_TXN *txn, DBT *key, DBT *value, uint32_t o
 	//txn_buf->completionp = kmem_cache_alloc(lightfs_completion_cachep, GFP_NOIO);
 	//lightfs_completion_init(txn_buf->completionp);
 	txn_buf_setup(txn_buf, value->data, off, value->size, type);
-	alloc_txn_buf_key_from_dbt(txn_buf, key);
+	//alloc_txn_buf_key_from_dbt(txn_buf, key);
+	copy_txn_buf_key_from_dbt(txn_buf, key);
 
 #ifdef TXN_BUFFER
 	spin_lock_irqsave(&txn_hdlr->txn_spin, irqflags);
@@ -373,6 +374,7 @@ int lightfs_bstore_txn_get(DB *db, DB_TXN *txn, DBT *key, DBT *value, uint32_t o
 	//wait_for_completion(txn_buf->completionp);
 	//lightfs_completion_free(txn_buf->completionp);
 	txn_buf->buf = NULL;
+	txn_buf->key = NULL;
 
 
 	if (txn_buf->ret == DB_NOTFOUND) {
@@ -391,10 +393,10 @@ int lightfs_bstore_txn_get_multi(DB *db, DB_TXN *txn, DBT *key, uint32_t cnt, YD
 	DB_TXN_BUF *txn_buf;
 	int ret = 0;
 	char *buf;
-	char *meta_key = key->data;
+	char *data_key = key->data;
 	DBT value;
 	int i, tmp = 0;
-	uint64_t block_num = ftfs_data_key_get_blocknum(meta_key, key->size);
+	uint64_t block_num = ftfs_data_key_get_blocknum(data_key, key->size);
 #ifdef TXN_BUFFER
 	uint64_t buffer_block_num = block_num;
 	volatile bool is_partial = 0;
@@ -405,14 +407,18 @@ int lightfs_bstore_txn_get_multi(DB *db, DB_TXN *txn, DBT *key, uint32_t cnt, YD
 	lightfs_txn_buf_init(txn_buf);
 	txn_buf->txn_id = txn->txn_id;
 	txn_buf->db = db;
-	buf = kmem_cache_alloc(lightfs_dbc_buf_cachep, GFP_NOIO);
+	//buf = kmem_cache_alloc(lightfs_dbc_buf_cachep, GFP_NOIO);
+	//if(!buf) {
+	//	pr_info("허허...\n"):
+	//}
 	//txn_buf_setup(txn_buf, buf, 0, cnt, type);
-	alloc_txn_buf_key_from_dbt(txn_buf, key);
+	//alloc_txn_buf_key_from_dbt(txn_buf, key);
+	copy_txn_buf_key_from_dbt(txn_buf, key);
 
 #ifdef TXN_BUFFER
 	txn_buf_setup(txn_buf, buf, 0, PAGE_SIZE, type);
 	for (i = 0; i < cnt; i++) {
-		ftfs_data_key_set_blocknum(meta_key, key->size, buffer_block_num++);
+		ftfs_data_key_set_blocknum(data_key, key->size, buffer_block_num++);
 		spin_lock_irqsave(&txn_hdlr->txn_spin, irqflags);
 		if (lightfs_txn_buffer_get(&txn_hdlr->txn_buffer, txn_buf)) {
 			spin_unlock_irqrestore(&txn_hdlr->txn_spin, irqflags);
@@ -431,36 +437,38 @@ int lightfs_bstore_txn_get_multi(DB *db, DB_TXN *txn, DBT *key, uint32_t cnt, YD
 	}
 #endif
 
-	pr_info("cnt: %d, block_num: %d\n", cnt, block_num);
+	//pr_info("cnt: %d, block_num: %d\n", cnt, block_num);
 	txn_buf_setup(txn_buf, buf, 0, cnt, type);
-	ftfs_data_key_set_blocknum(meta_key, key->size, block_num);
+	ftfs_data_key_set_blocknum(data_key, key->size, block_num);
 	txn_buf->buf -= (tmp * PAGE_SIZE);
 
 
 	txn_hdlr->db_io->get_multi(db, txn_buf);
 	
-//	if (txn_buf->ret == DB_NOTFOUND) {
-//		ret = DB_NOTFOUND;
-//		goto free_out;
-//	}
+	if (txn_buf->ret == DB_NOTFOUND) {
+		ret = DB_NOTFOUND;
+		goto free_out;
+	}
 
 
 
 
 	//dbt_alloc(&value, PAGE_SIZE);
 	//value.size = PAGE_SIZE;
-
+	buf = txn_buf->buf;
 	for (i = 0; i < cnt; i++) {
-		ftfs_data_key_set_blocknum(meta_key, key->size, block_num++);
+		ftfs_data_key_set_blocknum(data_key, key->size, block_num++);
 		//memcpy(value.data, buf + (i * PAGE_SIZE), PAGE_SIZE);
 		dbt_setup(&value, buf + (i * PAGE_SIZE), PAGE_SIZE);
 		f(key, &value, extra);
 	}
 	//dbt_destroy(&value);
-	
+	cheeze_free_io(txn_buf->ret);
+free_out:
 	txn_buf->buf = NULL;
+	txn_buf->key = NULL;
 
-	kmem_cache_free(lightfs_dbc_buf_cachep, buf);
+	//kmem_cache_free(lightfs_dbc_buf_cachep, buf);
 	lightfs_txn_buf_free(txn_buf);
 
 	return ret;

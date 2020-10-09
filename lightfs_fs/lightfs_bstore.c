@@ -1057,6 +1057,9 @@ static int ftfs_scan_pages_cb(DBT const *key, DBT const *val, void *extra)
 
 		while (page_block_num < ftfs_data_key_get_blocknum(data_key, key->size)) {
 			page_buf = kmap_atomic(page);
+			if (!page_buf) {
+				pr_info("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!1\n");
+			}
 			memset(page_buf, 0, PAGE_SIZE);
 			kunmap_atomic(page_buf);
 
@@ -1073,6 +1076,9 @@ static int ftfs_scan_pages_cb(DBT const *key, DBT const *val, void *extra)
 			block_off = block_get_off_by_position(size);
 			block_num = ftfs_get_block_num_by_size(size);
 			page_buf = kmap_atomic(page);
+			if (!page_buf || !val->data) {
+				pr_info("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!2\n");
+			}
 			if (val->size)
 				memcpy(page_buf, val->data, val->size);
 			if (page_block_num == block_num && block_off && block_off < PAGE_SIZE) {

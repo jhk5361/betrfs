@@ -103,14 +103,15 @@ static inline void txn_buf_setup_cpy(DB_TXN_BUF *txn_buf, const void *data, uint
 
 static inline void alloc_txn_buf_key_from_dbt(DB_TXN_BUF *txn_buf, const DBT *dbt)
 {
-	txn_buf->key = kmalloc(dbt->size, GFP_NOIO);
+	txn_buf->key = kmalloc(dbt->size, GFP_KERNEL);
 	memcpy(txn_buf->key, dbt->data, dbt->size);
 	txn_buf->key_len = dbt->size;
 }
 
 static inline void copy_txn_buf_key_from_dbt(DB_TXN_BUF *txn_buf, DBT *dbt)
 {
-	memcpy(txn_buf->key, dbt->data, dbt->size);
+	//memcpy(txn_buf->key, dbt->data, dbt->size);
+	txn_buf->key = dbt->data;
 	txn_buf->key_len = dbt->size;
 }
 

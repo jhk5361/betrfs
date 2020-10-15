@@ -1625,7 +1625,8 @@ ftfs_fsync(struct file *file, loff_t start, loff_t end, int datasync)
 
 	//ftfs_error(__func__, "오메나 클났다잉\n");
 
-	ret = generic_file_fsync(file, start, end, datasync);
+	//ret = generic_file_fsync(file, start, end, datasync);
+	ret = 1;
 
 	if (!ret) {
 

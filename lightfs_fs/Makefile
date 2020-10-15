@@ -14,13 +14,14 @@ KBUILD_CFLAGS +=  -I./cheeze \
 				  -DSUPER_NOLOCK \
 				  -DMONITOR \
 				  -DGET_MULTI \
-#				  -DWB \
+				  -DWB \
+#				  -DIS_IN_VM \
 #				  -DFTFS_DEBUG \
+#				  -DCALL_TRACE \
 #				  -DTIME_CHECK \
 #				  -DTXN_BUFFER \
 #				  -DTXN_TIME_CHECK \
 #				  -DBETR \
-#				  -DCALL_TRACE \
 #				  -DCALL_TRACE_TIME \
 #				  -DRB_LOCK \
 #				  -DRB_CACHE \

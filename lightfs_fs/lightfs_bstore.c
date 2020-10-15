@@ -651,6 +651,7 @@ int ftfs_bstore_meta_get(DB *meta_db, DBT *meta_dbt, DB_TXN *txn,
                          struct ftfs_metadata *metadata)
 {
 	int ret;
+	static int miss = 0;
 	DBT value, tmp;
 
 #ifdef BETR
@@ -666,7 +667,10 @@ int ftfs_bstore_meta_get(DB *meta_db, DBT *meta_dbt, DB_TXN *txn,
 		ret = -ENOENT;
 	} else if (ret == DB_FOUND_FREE) {
 			dbt_setup(&tmp, metadata, sizeof(*metadata));
-			ret = meta_db->get(meta_db, txn, meta_dbt, &tmp, LIGHTFS_META_GET);
+			//if ( ((miss++) % MISS_RATE) == 0)
+				//ret = meta_db->get(meta_db, txn, meta_dbt, &tmp, LIGHTFS_META_GET);
+			//else 
+				ret = 0;
 	}
 
 	return ret;

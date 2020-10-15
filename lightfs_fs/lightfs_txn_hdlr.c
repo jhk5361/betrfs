@@ -40,6 +40,7 @@ static inline void lightfs_c_txn_init(void *c_txn)
 	INIT_LIST_HEAD(&_c_txn->txn_list);
 	INIT_LIST_HEAD(&_c_txn->children);
 	_c_txn->size = 0;
+	_c_txn->cnt = 0;
 	_c_txn->filter = (struct bloomfilter *)kmalloc(sizeof(struct bloomfilter) + C_TXN_BLOOM_M_BYTES, GFP_NOIO);
 	_c_txn->state = TXN_CREATED;
 	_c_txn->parents = 0;
@@ -52,7 +53,7 @@ static inline void lightfs_c_txn_init(void *c_txn)
 
 static inline void lightfs_c_txn_free(DB_C_TXN *c_txn)
 {
-	ftfs_error(__func__, "c_txn: %p\n", c_txn);
+	//ftfs_error(__func__, "c_txn: %p\n", c_txn);
 	kfree(c_txn->filter);
 	kmem_cache_free(lightfs_c_txn_cachep, c_txn);
 }
@@ -82,7 +83,7 @@ static inline void lightfs_txn_free(DB_TXN *txn) {
 
 	}
 #endif
-	ftfs_error(__func__, "txn: %p\n", txn);
+	//ftfs_error(__func__, "txn: %p\n", txn);
 	kmem_cache_free(lightfs_txn_cachep, txn);
 }
 
@@ -264,14 +265,14 @@ int lightfs_bstore_txn_begin(DB_TXN *parent, DB_TXN **txn, uint32_t flags)
 		spin_lock_irqsave(&txn_hdlr->txn_spin, irqflags);
 		(*txn)->txn_id = txn_hdlr->txn_id++;
 		spin_unlock_irqrestore(&txn_hdlr->txn_spin, irqflags);
-		ftfs_error(__func__, "READ txn: %p\n", *txn);
+		//ftfs_error(__func__, "READ txn: %p\n", *txn);
 		return 0;
 	}
 	if (txn_hdlr->txn_cnt >= SOFT_TXN_LIMIT) {
 		spin_lock_irqsave(&txn_hdlr->txn_spin, irqflags);
 		//txn_hdlr->state = true;
 		if (wq_has_sleeper(&txn_hdlr->wq)) {
-			ftfs_error(__func__, "핸들러 깨울게\n");
+			//ftfs_error(__func__, "핸들러 깨울게\n");
 			wake_up(&txn_hdlr->wq);
 		}
 		spin_unlock_irqrestore(&txn_hdlr->txn_spin, irqflags);
@@ -311,7 +312,7 @@ int lightfs_bstore_txn_begin(DB_TXN *parent, DB_TXN **txn, uint32_t flags)
 
 	*txn = kmem_cache_alloc(lightfs_txn_cachep, GFP_NOIO);
 	lightfs_txn_init(*txn);
-	ftfs_error(__func__, "NO READ txn: %p\n", *txn);
+	//ftfs_error(__func__, "NO READ txn: %p\n", *txn);
 	// lightfs_txn_init_once
 #ifdef TXN_TIME_CHECK
 	//(*txn)->begin = begin;
@@ -540,7 +541,7 @@ int lightfs_bstore_dbc_c_get(DBC *dbc, DBT *key, DBT *value, uint32_t flags)
 		return dbc->cheeze_dbc->c_get(dbc->cheeze_dbc, key, value, flags);
 #endif
 		if (txn_buf->ret == DB_NOTFOUND) {
-			ftfs_error(__func__, "NOT FOUND\n");
+			//ftfs_error(__func__, "NOT FOUND\n");
 			return DB_NOTFOUND;
 		} else {
 			dbc->buf_len = txn_buf->ret;
@@ -760,6 +761,11 @@ int lightfs_bstore_txn_insert(DB *db, DB_TXN *txn, const DBT *key, const DBT *va
 #endif
 	} else { // DEL, DEL_MULTI ==> off: cnt of objects
 		txn_buf_setup(txn_buf, NULL, off, PAGE_SIZE * off, type);
+		txn->cnt++;
+		txn->size += calc_txn_buf_size(txn_buf);
+		list_add_tail(&txn_buf->txn_buf_list, &txn->txn_buf_list);
+		ftfs_error(__func__, "txn_id: %d txn_buf: %d txn->cnt: %d txn->size %d\n", txn->txn_id, calc_txn_buf_size(txn_buf), txn->cnt, txn->size);
+		return 0;
 	}
 
 	txn->cnt++;
@@ -841,7 +847,7 @@ static int lightfs_c_txn_create(DB_C_TXN **c_txn, enum lightfs_txn_state state, 
 	(*c_txn)->workq_id = workq_id;
 	spin_unlock_irqrestore(&txn_hdlr->c_txn_spin, flag);
 
-	ftfs_error(__func__, "c_txn: %p cnt: %d\n", *c_txn, ++cnt);
+	//ftfs_error(__func__, "c_txn: %p cnt: %d\n", *c_txn, ++cnt);
 
 	return 0;
 }
@@ -899,6 +905,7 @@ static int lightfs_c_txn_insert(DB_C_TXN *c_txn, DB_TXN *txn)
 		//ftfs_error(__func__, "있네 있어\n", txn->txn_id);
 	}
 	c_txn->size += txn->size;
+	c_txn->cnt += txn->cnt;
 	//ftfs_error(__func__, "TXN 줄어야돼: %d, c_txn->size:%d\n", txn_hdlr->txn_cnt, c_txn->size);
 	//c_txn->state = TXN_INSERTING;
 
@@ -1031,7 +1038,7 @@ static int lightfs_c_txn_transfer(DB_C_TXN *c_txn)
 	//
 	txn_hdlr->committing_c_txn_cnt++;
 	c_txn->state |= TXN_TRANSFERING;
-	ftfs_error(__func__, "c_txn_transfer c_txn_tid:%d c_txn:%p size:%d txn_cnt: %d running_cnt:%d workq_id: %d\n", c_txn->txn_id, c_txn, c_txn->size, txn_hdlr->txn_cnt, txn_hdlr->running_c_txn_cnt, c_txn->workq_id);
+	ftfs_error(__func__, "c_txn_transfer c_txn_tid:%d c_txn:%p size:%d txn_cnt: %d txn->cnt: %d running_cnt:%d workq_id: %d\n", c_txn->txn_id, c_txn, c_txn->size, txn_hdlr->txn_cnt, c_txn->cnt, txn_hdlr->running_c_txn_cnt, c_txn->workq_id);
 	//txn_hdlr->db_io->transfer(NULL, c_txn, NULL, NULL); // should block or sleep until transfer is completed
 	txn_hdlr->db_io->transfer(NULL, c_txn, lightfs_c_txn_transfer_cb, c_txn); // should block or sleep until transfer is completed
 	//lightfs_c_txn_transfer_cb(c_txn);
@@ -1304,18 +1311,18 @@ txn_repeat:
 
 		spin_lock_irqsave(&txn_hdlr->txn_spin, flags);
 		if (txn_hdlr->txn_cnt < TXN_THRESHOLD && wq_has_sleeper(&txn_hdlr->txn_wq)) {
-			ftfs_error(__func__, "touch TXN_THRESHOLD\n");
+			//ftfs_error(__func__, "touch TXN_THRESHOLD\n");
 			wake_up_all(&txn_hdlr->txn_wq);
 		}
 		if (list_empty(&txn_hdlr->txn_list)) {
-			ftfs_error(__func__, "TXN 비었다 cnt:%d\n", txn_hdlr->txn_cnt);
+			//ftfs_error(__func__, "TXN 비었다 cnt:%d\n", txn_hdlr->txn_cnt);
 			spin_unlock_irqrestore(&txn_hdlr->txn_spin, flags);
 			goto transfer_now;
 		}
 
 		txn = list_first_entry(&txn_hdlr->txn_list, DB_TXN, txn_list);
 		if (txn->state != TXN_COMMITTED) {
-			ftfs_error(__func__, "첫번째 커밋 안됐다\n");
+			//ftfs_error(__func__, "첫번째 커밋 안됐다\n");
 			spin_unlock_irqrestore(&txn_hdlr->txn_spin, flags);
 			//goto txn_repeat;
 			goto wait_for_txn;

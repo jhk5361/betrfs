@@ -33,6 +33,7 @@
 #define HASHTABLE_BITS 20
 #define CONCURRENT_CNT 2
 #define OPS_CNT 30
+#define MISS_RATE 10
 
 
 
@@ -102,6 +103,7 @@ struct __lightfs_c_txn {
 	struct work_struct work;
 	uint64_t workq_id;
 	int committing_cnt;
+	uint32_t cnt;
 };
 
 struct __lightfs_c_txn_list {

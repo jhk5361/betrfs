@@ -121,6 +121,7 @@ static inline int lightfs_ht_cache_get (DB *db, DB_TXN *txn, DBT *key, DBT *valu
 			if (cache_item->fp == fp && !lightfs_keycmp(cache_item->key.data, cache_item->key.size, key->data, key->size)) {
 				if (cache_item->is_weak_del) {
 					memcpy(value->data, cache_item->value.data, value->size);
+					cache_item->is_weak_del = 0;
 					//spin_unlock_bh(&ht_item->lock);
 					//spin_unlock(&ht_item->lock);
 					up_read(&ht_item->lock);

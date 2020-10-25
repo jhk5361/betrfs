@@ -15,7 +15,8 @@ KBUILD_CFLAGS +=  -I./cheeze \
 				  -DMONITOR \
 				  -DGET_MULTI \
 				  -DWB \
-#				  -DIS_IN_VM \
+				  -DIS_IN_VM \
+				  -DPRINT_QD \
 #				  -DFTFS_DEBUG \
 #				  -DCALL_TRACE \
 #				  -DTIME_CHECK \

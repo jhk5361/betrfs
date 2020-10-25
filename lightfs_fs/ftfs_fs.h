@@ -375,7 +375,7 @@ static inline void ftio_setup(struct ftio *ftio, struct list_head *pages,
 		struct page *page = list_entry(pages->prev, struct page, lru);
 		prefetchw(&page->flags);
 		list_del(&page->lru);
-		if (!add_to_page_cache_lru(page, mapping, page->index, GFP_NOIO))
+		if (!add_to_page_cache_lru(page, mapping, page->index, readahead_gfp_mask(mapping)))
 			ftio_add_page(ftio, page);
 		put_page(page);
 		//page_cache_release(page); #koo
@@ -506,7 +506,7 @@ static inline void print_key(const char *func, char *key, uint16_t key_len){
 	}
 	else{
 		block_num=ftfs_data_key_get_blocknum(key, key_len);
-		pr_info("(%s) Dkey: %c%llu %llxx(keylen:%u)\n",func, key[0],inode_num, block_num,remain);
+		pr_info("(%s) Dkey: %c%llu %llx(keylen:%u)\n",func, key[0],inode_num, block_num,remain);
 	}
 
 }

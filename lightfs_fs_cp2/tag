@@ -1,0 +1,46 @@
+lightfs_io.c:	ra_entry->tag = req.id;
+lightfs_io.c:	ra_entry->buf = buf;
+cheeze/shm.c:						struct ftfs_inode *ftfs_inode = (struct ftfs_inode *)(ra_entry->extra);
+cheeze/shm.c:						ra_entry->reada_state |= READA_DONE;
+cheeze/shm.c:						complete_all(&ra_entry->reada_acked);
+lightfs_bstore.c:		current_block_num = last_ra_entry->reada_block_start + last_ra_entry->reada_block_len;
+lightfs_reada.c:	//BUG_ON(ra_entry->reada_state & READA_FULL);
+lightfs_reada.c:	ra_entry->reada_state = READA_FULL;
+lightfs_reada.c:	ra_entry->reada_block_start = current_block_num;
+lightfs_reada.c:	ra_entry->reada_block_len = block_cnt;
+lightfs_reada.c:	ra_entry->tag = 0;
+lightfs_reada.c:	init_completion(&ra_entry->reada_acked);
+lightfs_reada.c:	ra_entry->extra = ftfs_inode;
+lightfs_reada.c:	INIT_LIST_HEAD(&ra_entry->list);
+lightfs_reada.c:	list_add_tail(&ra_entry->list, &ftfs_inode->ra_list);
+lightfs_reada.c:	//spin_lock_init(&ra_entry->reada_spin);
+lightfs_reada.c:	//BUG_ON(!(ra_entry->reada_state & READA_DONE));
+lightfs_reada.c:	if (!(ra_entry->reada_state & READA_DONE)) {
+lightfs_reada.c:		wait_for_completion(&ra_entry->reada_acked);
+lightfs_reada.c:	cheeze_free_io(ftfs_inode->ra_entry->tag);
+lightfs_reada.c:	list_del(&ra_entry->list);
+lightfs_reada.c:	cheeze_free_io(ra_entry->tag);
+lightfs_reada.c:	ra_entry->reada_state = READA_FULL;
+lightfs_reada.c:	ra_entry->reada_block_start = current_block_num;
+lightfs_reada.c:	ra_entry->reada_block_len = block_cnt;
+lightfs_reada.c:	ra_entry->tag = 0;
+lightfs_reada.c:	reinit_completion(&ra_entry->reada_acked);
+lightfs_reada.c:	ra_entry->extra = ftfs_inode;
+lightfs_reada.c:	list_move_tail(&ra_entry->list, &ftfs_inode->ra_list);
+lightfs_reada.c:	//spin_lock_init(&ra_entry->reada_spin);
+lightfs_reada.c:			if (current_start_block + nr_pages == ftfs_inode->ra_entry->reada_block_start + ftfs_inode->ra_entry->reada_block_len) {
+lightfs_reada.c:	ret = ftfs_inode->ra_entry->reada_state & READA_DONE;
+lightfs_reada.c:	if (ra_entry->reada_state & READA_EMPTY || nr_pages < READA_THRESHOLD) {
+lightfs_reada.c:	if (current_block_num >=  ra_entry->reada_block_start) {
+lightfs_reada.c:		idx = current_block_num - ra_entry->reada_block_start;
+lightfs_reada.c:		if (current_block_num + nr_pages <= ra_entry->reada_block_start + ra_entry->reada_block_len) { // buf is enough to serve requests
+lightfs_reada.c:			if (!(ra_entry->reada_state & READA_DONE)) {
+lightfs_reada.c:				wait_for_completion(&ra_entry->reada_acked);
+lightfs_reada.c:			BUG_ON(!(ra_entry->reada_state & READA_DONE));
+lightfs_reada.c:				memcpy(page_buf, ra_entry->buf + idx, PAGE_SIZE);
+lightfs_reada.c:		} else if (current_block_num < ra_entry->reada_block_start + ra_entry->reada_block_len) { // buf is not enough
+lightfs_reada.c:			if (!(ra_entry->reada_state & READA_DONE)) {
+lightfs_reada.c:				wait_for_completion(&ra_entry->reada_acked);
+lightfs_reada.c:			BUG_ON(!(ra_entry->reada_state & READA_DONE));
+lightfs_reada.c:			while(idx < ra_entry->reada_block_len) {
+lightfs_reada.c:				memcpy(page_buf, ra_entry->buf + idx, PAGE_SIZE);
